@@ -341,7 +341,17 @@ export interface BoardNode {
     trackConversions?: boolean;
     saveAdsToLibrary?: boolean;
     customPrompt?: string;
+    savedPrompts?: SavedPromptItem[];
+    activePromptId?: string;
   };
+}
+
+export interface SavedPromptItem {
+  id: string;
+  name: string;
+  prompt: string;
+  createdAt: string;
+  isDefault?: boolean;
 }
 
 export interface BoardShape {

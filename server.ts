@@ -11,7 +11,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const port = parseInt(process.env.PORT || '3000', 10);
+// AI Studio dev server runs on port 3000 (Cloud Run / NGINX reverse-proxies 8080 -> 3000)
+const port = process.env.PORT && process.env.PORT !== '8080' ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -96,32 +97,36 @@ app.post('/api/ai/agent', async (req: Request, res: Response) => {
     const targetLanguage = contextData?.language || 'English';
 
     const systemInstruction = `You are Product Intelligence OS, an elite Algerian & international e-commerce strategist, data analyst, copywriter, media buyer, and product researcher.
-Your primary directive is to execute the EXACT intelligence task required by the specific skill ("${taskType || 'E-commerce Analysis'}") and user prompt.
+Your primary directive is to execute the EXACT intelligence task requested by the specific skill ("${taskType || 'E-commerce Analysis'}") and user prompt.
 
-CRITICAL INSTRUCTION - AUTHENTIC DOMAIN-SPECIFIC STRUCTURE:
-DO NOT force every response into a generic template. The structure, headings, tables, and diagrams MUST DIRECTLY MATCH what this specific skill does and what the user's prompt requests:
-- If the skill is Product Discovery or Winning Product Finder:
-  Provide a Product Opportunity Scoring table (| 🎯 Metric | Value | Why it matters |) with Demand Score, Wow Factor, Problem Severity, Profit Margin, Risk, and Total Score (/50), Market Validation Criteria table, viral signals, and a clear launch verdict.
-- If the skill is Product Deep Dive or Technical Breakdown:
-  Provide an exhaustive technical breakdown, material specs, quality inspection criteria, USP & Value Chain hierarchy tree diagram (USP → Value Prop → Positioning → Pricing), and a failure points / return prevention table.
-- If the skill is Customer Avatar, Buyer Persona, or Market Strategy:
-  Provide a comprehensive Customer Avatar table (| Avatar | Pain Points | Desires | Awareness Level | Objections |), pricing strategy evaluation table, and objection rebuttal scripts.
-- If the skill is Creative & Hooks, Ad Copy, or Video Scripting:
-  Provide an Angle Matrix table (| Angle Name | Hook Formula | Visual Concept | Emotion Targeted |), 4-5 high-converting hook scripts with predicted CTR % (| Hook Script | Predicted CTR % | Format | Priority |), creative priority, and 4-stage visual storyboard cues.
-- If the skill is Campaign Structure, Media Buying, Meta Ads, or TikTok Ads:
-  Provide campaign budget allocation table, funnel benchmarks table (| Metric | Benchmark | Target Rate | Status 🟢🟡🔴 | Action |), funnel step flowchart, and targeting strategy.
-- If the skill is Pricing, Economics, Margin, or Financials:
-  Provide pricing tier test table, complete unit economics formula table (Selling Price, COGS, Shipping, Confirmation, RTO Cost, Ad Spend, Net Profit), and break-even ROAS.
-- If the skill is Logistics, Delivery, Call Center Confirmation, or RTO Mitigation:
-  Provide courier performance table (| Courier | Delivery Rate % | Avg Days | Cost (DZD) |), RTO failure root causes table (% of Failures, Reason, Fix), confirmation call protocol/script, and return reduction priority table.
-- If the skill is All In One or Master 15-Stage Funnel:
-  Provide the complete 15-Stage Funnel Summary table (| Layer | Stage | Key Metric | Status 🟢🟡🔴 | #1 Next Action |), followed by deep dives into priority stages.
+MANDATORY TITLE REQUIREMENT:
+The very first line of your markdown output MUST be a top-level header stating the EXACT task / skill name and product name:
+### ${taskType || 'Intelligence Analysis'}: ${contextData?.product?.title || contextData?.title || 'Target Product'}
+
+CRITICAL INSTRUCTION - AUTHENTIC DOMAIN-SPECIFIC STRUCTURE & OPTIONAL TABLES:
+DO NOT force every response into a generic template. YOU ARE NOT OBLIGED TO USE A TABLE ("pas obligé d'utiliser un tableau"):
+- If the task is Creative & Hooks, Ad Copy, Video Scripting, or UGC:
+  DO NOT USE A TABLE FOR SCRIPTS. Provide 4-5 high-converting hook variations with visual cues and on-screen text, followed by a complete 30-second video script (Timecode, Scene, Audio/Voiceover, Visual Action).
+- If the task is Objection Handling, Confirmation Call, WhatsApp Audio, or Customer Support:
+  DO NOT USE A TABLE. Provide the 10-minute confirmation protocol, the word-for-word phone/WhatsApp audio script in ${targetLanguage}, and scripts for rebutting the top 5 customer objections.
+- If the task is Technical Breakdown, Specifications, Quality, or How-to:
+  Provide clear material specifications, a step-by-step unboxing/inspection checklist, and return prevention steps using bullet points and checklists.
+- If the task is Customer Avatar or Buyer Persona:
+  Provide a deep dive into the primary customer avatar's daily pains, buying triggers, and hesitations. A table is optional and only used if comparing multiple distinct personas.
+- If the task is Pricing, Unit Economics, or Financials:
+  Provide a complete Unit Economics Table (| Cost Component | Amount | % of Selling Price | Notes |) with Selling Price, COGS, Shipping, Confirmation, Packaging, RTO Reserve, and Net Profit.
+- If the task is Logistics, Delivery, or Courier Comparison:
+  Provide a Courier Delivery Performance Table (| Courier Partner | Delivery Rate % | Avg Transit Days | Stop-Desk Cost | Home Cost | Coverage |) and actionable RTO failure fixes.
+- If the task is Campaign Structure or Media Buying:
+  Provide a Campaign & AdSet Budget Allocation Table (| Campaign / AdSet | Daily Budget | Audience Targeting | Placement | Target CPA |).
+- For all other skills:
+  Provide clear executive findings, bulleted strategic recommendations, and a numbered action plan without forcing an artificial evaluation table.
 - If the user provides CUSTOM INSTRUCTIONS or an EDITED PROMPT:
-  STRICTLY honor the user's requested sections, table headers, questions, or formats. Never ignore user instructions.
+  STRICTLY honor the user's requested sections, questions, and formats. Never force an unneeded table.
 
 STRICT MANDATORY LANGUAGE REQUIREMENT:
 The user has chosen the target language: "${targetLanguage}".
-You MUST write the ENTIRE output, including all section headings, tables, scripts, metrics, and action steps, 100% EXCLUSIVELY in "${targetLanguage}".
+You MUST write the ENTIRE output, including all section headings, scripts, metrics, and action steps, 100% EXCLUSIVELY in "${targetLanguage}".
 DO NOT mix multiple languages. Never include English or French phrases if Arabic or Algerian Darja is selected. Never include Arabic or Darija if English or French is selected.
 
 CRITICAL FORMATTING RULES:
@@ -129,8 +134,7 @@ CRITICAL FORMATTING RULES:
 - NEVER return a JSON array (do NOT return ["...", "..."]).
 - NEVER wrap paragraphs or headings in quotation marks.
 - NEVER output escaped newlines as \\n; always use actual line breaks.
-- Use rich Markdown tables with clear headers and status indicator badges (🟢, 🟡, 🔴, 🟩, 🟨, P1, P2, P3) where appropriate.
-- Include structured flowcharts / tree diagrams using ASCII indentation (e.g. ├─, └─) when illustrating funnels or value props.`;
+- Only include Markdown tables when genuinely appropriate for the searched topic.`;
 
     const fullPrompt = `Skill / Task: ${taskType || 'E-commerce Analysis'}
 Target Product Information:
@@ -3018,21 +3022,25 @@ function generateLocalAISimulation(taskType: string, prompt: string, contextData
   const userInstructions = (contextData?.customInstructions || '').trim();
   const fullPrompt = `${prompt || ''} ${userInstructions}`.toLowerCase();
   const taskLower = (taskType || '').toLowerCase();
+  const effectiveTask = taskType || 'E-Commerce Intelligence';
 
-  // Classify skill archetype
+  // Classify skill archetype with clear separation
   const isMaster = taskLower.includes('all in one') || taskLower.includes('master') || taskLower.includes('15-stage') || taskLower.includes('funnel') || fullPrompt.includes('15-stage');
-  const isProductDiscovery = !isMaster && (taskLower.includes('discovery') || taskLower.includes('winning') || taskLower.includes('finder') || taskLower.includes('demand') || taskLower.includes('trend') || taskLower.includes('scout') || fullPrompt.includes('discovery') || fullPrompt.includes('scoring table'));
-  const isDeepDive = !isMaster && (taskLower.includes('deep dive') || taskLower.includes('technical') || taskLower.includes('spec') || taskLower.includes('anatomy') || taskLower.includes('quality') || fullPrompt.includes('deep dive') || fullPrompt.includes('usp → value prop'));
-  const isAvatar = !isMaster && (taskLower.includes('avatar') || taskLower.includes('persona') || taskLower.includes('strategy') || taskLower.includes('positioning') || taskLower.includes('buyer') || fullPrompt.includes('avatar'));
-  const isCreative = !isMaster && (taskLower.includes('creative') || taskLower.includes('hook') || taskLower.includes('angle') || taskLower.includes('copy') || taskLower.includes('video') || taskLower.includes('ugc') || taskLower.includes('script') || fullPrompt.includes('hook'));
-  const isCampaign = !isMaster && (taskLower.includes('campaign') || taskLower.includes('meta') || taskLower.includes('tiktok') || taskLower.includes('traffic') || taskLower.includes('budget') || taskLower.includes('media buying'));
-  const isPricing = !isMaster && (taskLower.includes('pricing') || taskLower.includes('economic') || taskLower.includes('margin') || taskLower.includes('profit') || taskLower.includes('financial') || taskLower.includes('cost') || taskLower.includes('roas'));
-  const isLogistics = !isMaster && (taskLower.includes('delivery') || taskLower.includes('courier') || taskLower.includes('rto') || taskLower.includes('return') || taskLower.includes('confirmation') || taskLower.includes('logistics') || taskLower.includes('yalidine'));
+  const isConfirmation = !isMaster && (taskLower.includes('confirm') || taskLower.includes('phone') || taskLower.includes('call') || taskLower.includes('whatsapp') || taskLower.includes('objection') || taskLower.includes('rebuttal') || taskLower.includes('tele') || taskLower.includes('support') || fullPrompt.includes('confirmation script') || fullPrompt.includes('objection'));
+  const isCompetitor = !isMaster && !isConfirmation && (taskLower.includes('competitor') || taskLower.includes('spy') || taskLower.includes('benchmark') || taskLower.includes('saturation') || taskLower.includes('market analysis') || fullPrompt.includes('competitor'));
+  const isQuality = !isMaster && !isConfirmation && (taskLower.includes('packag') || taskLower.includes('unboxing') || taskLower.includes('qc') || taskLower.includes('checklist') || taskLower.includes('inspect'));
+  const isProductDiscovery = !isMaster && !isConfirmation && !isCompetitor && (taskLower.includes('discovery') || taskLower.includes('winning') || taskLower.includes('finder') || taskLower.includes('demand') || taskLower.includes('trend') || taskLower.includes('scout') || fullPrompt.includes('discovery') || fullPrompt.includes('scoring table'));
+  const isDeepDive = !isMaster && !isConfirmation && !isCompetitor && (taskLower.includes('deep dive') || taskLower.includes('technical') || taskLower.includes('spec') || taskLower.includes('anatomy') || taskLower.includes('quality') || fullPrompt.includes('deep dive') || fullPrompt.includes('usp → value prop'));
+  const isAvatar = !isMaster && !isConfirmation && !isCompetitor && (taskLower.includes('avatar') || taskLower.includes('persona') || taskLower.includes('psychographic') || taskLower.includes('buyer') || fullPrompt.includes('avatar'));
+  const isCreative = !isMaster && !isConfirmation && (taskLower.includes('creative') || taskLower.includes('hook') || taskLower.includes('angle') || taskLower.includes('copy') || taskLower.includes('video') || taskLower.includes('ugc') || taskLower.includes('script') || fullPrompt.includes('hook'));
+  const isCampaign = !isMaster && !isConfirmation && !isCompetitor && (taskLower.includes('campaign') || taskLower.includes('meta') || taskLower.includes('tiktok') || taskLower.includes('traffic') || taskLower.includes('budget') || taskLower.includes('media buying'));
+  const isPricing = !isMaster && !isConfirmation && !isCompetitor && (taskLower.includes('pricing') || taskLower.includes('economic') || taskLower.includes('margin') || taskLower.includes('profit') || taskLower.includes('financial') || taskLower.includes('cost') || taskLower.includes('roas'));
+  const isLogistics = !isMaster && !isConfirmation && (taskLower.includes('delivery') || taskLower.includes('courier') || taskLower.includes('rto') || taskLower.includes('return') || taskLower.includes('logistics') || taskLower.includes('yalidine'));
 
   // 1. MASTER FULL-FUNNEL ORCHESTRATION (The 15-Stage Funnel requested by user)
   if (isMaster) {
     if (language === 'French') {
-      return `### summary
+      return `### ${effectiveTask} : ${title}
 
 | Layer | Stage | Key Metric | Status 🟢🟡🔴 | #1 Next Action |
 |-------|-------|------------|----------------|----------------|
@@ -3052,7 +3060,7 @@ function generateLocalAISimulation(taskType: string, prompt: string, contextData
 | 14    | Optimisation IA | Coût par Acquisition | 🟡 | Réallouer vers les Wilayas gagnantes |
 | 15    | Nouveau Trafic | Potentiel d'Échelle | 🟡 | Étendre vers de nouveaux segments |
 
-### keyPoints
+### Métriques Clés de Performance
 
 | 🎯 Metric | Value | Why it matters |
 |-----------------|-------|---------------------------------------------------------------------|
@@ -3077,7 +3085,7 @@ USP → Proposition de Valeur → Positionnement → Tarification
 \`\`\``;
     }
 
-    return `### summary
+    return `### ${effectiveTask}: ${title}
 
 | Layer | Stage | Key Metric | Status 🟢🟡🔴 | #1 Next Action |
 |-------|-------|------------|----------------|----------------|
@@ -3097,7 +3105,7 @@ USP → Proposition de Valeur → Positionnement → Tarification
 | 14    | AI Optimization | CPA | 🟡 | Adjust campaigns based on data |
 | 15    | New Traffic | Expansion Opportunities | 🟡 | Research new audience segments |
 
-### keyPoints
+### Key Performance Benchmarks
 
 | 🎯 Metric | Value | Why it matters |
 |-----------------|-------|---------------------------------------------------------------------|
@@ -3125,7 +3133,7 @@ USP → Value Prop → Positioning → Pricing
   // 2. PRODUCT DISCOVERY & WINNING PRODUCT FINDER
   if (isProductDiscovery) {
     if (language === 'Arabic' || language === 'Algerian Darja') {
-      return `### ملخص تنفيذي لفرصة المنتج
+      return `### ${effectiveTask}: ${title}
 
 يعتبر **${title}** من أكثر المنتجات الواعدة تجارياً في سوق التجارة الإلكترونية الجزائري. يتميز المنتج بعامل جذب بصري فوري (Visual Wow Factor) مع هامش ربح استثنائي يبلغ **+${margin}%**، مما يتيح التوسع الإعلاني المريح بنظام الدفع عند الاستلام (COD) مع تغطية شاملة لـ 58 ولاية.
 
@@ -3154,7 +3162,7 @@ USP → Value Prop → Positioning → Pricing
 - إطلاق حملة اختبار بـ 3 فيديوهات بالدارجة الجزائرية تركز على تجربة الجلوس المباشر.`;
     }
 
-    return `### Product Opportunity Assessment
+    return `### ${effectiveTask}: ${title}
 
 The **${title}** is an evergreen, high-demand product with exceptional demonstration appeal. With a selling price of **${price.toLocaleString()} DZD** against a landed wholesale cost of **${cost.toLocaleString()} DZD** (+${margin}% gross margin), it provides a rock-solid financial foundation for aggressive Cash on Delivery scaling across Algeria.
 
@@ -3186,7 +3194,7 @@ The **${title}** is an evergreen, high-demand product with exceptional demonstra
   // 3. PRODUCT DEEP DIVE & TECHNICAL BREAKDOWN
   if (isDeepDive) {
     if (language === 'Arabic' || language === 'Algerian Darja') {
-      return `### التحليل التقني وتفكيك المنتج
+      return `### ${effectiveTask}: ${title}
 
 دراسة فاحصة لمنتج **${title}** لبيان تفاصيل المادة المصنعة، وقدرة تحمل الوزن، وتفادي مشاكل المرتجعات اللوجستية قبل الانطلاق.
 
@@ -3256,216 +3264,305 @@ USP → Value Prop → Positioning → Pricing
 | Zipper snagging during first wash | 3% | Low-gauge zipper pull | Inspect and verify reinforced nylon coil zippers |`;
   }
 
-  // 4. CUSTOMER AVATAR & STRATEGY
-  if (isAvatar) {
-    return `### Customer Persona & Market Strategy
-
-Comprehensive psychological profiling and target avatar analysis for **${title}** in the Algerian e-commerce landscape.
-
-### Customer Avatar Matrix
-
-| Avatar | Pain Points | Desires | Awareness Level | Objections |
-|----------------|-------------------|------------------|------------------|-------------------|
-| Professional Driver | Lower back stiffness, tailbone numbness on 6h+ shifts | Long-lasting relief, durable cushion that doesn't slip | Problem Aware | "Will it go flat after two weeks of heavy use?" |
-| Desk / Remote Worker | Poor desk posture, sciatic nerve pain, office fatigue | All-day comfort, higher focus, neat office look | Solution Aware | "Is the price justified compared to basic foam?" |
-| Post-Surgery / Elder | Tailbone soreness, inability to sit on hard dining chairs | Safe, soft orthopedic support recommended by family | Pain Aware | "Can I inspect the product before paying the courier?" |
-
-### Pricing Strategy Evaluation
-
-| Pricing Strategy | Score | Demand Impact | Profit Potential |
-|------------------|-------|---------------|------------------|
-| Low Price Entry (${(price * 0.8).toFixed(0)} DZD) | 6/10 | High Volume | Low margin buffer (${margin - 15}%) |
-| Recommended Sweetspot (${price.toLocaleString()} DZD) | 9/10 | Balanced High Demand | Optimal Profit (+${profit.toLocaleString()} DZD / order) |
-| Premium 2x Duo Bundle (${(price * 1.8).toFixed(0)} DZD) | 8.5/10 | +38% Increase in AOV | Maximum Net Profit & Free Wilaya Shipping |
-| **Overall Strategy** | **8.5/10** | **Balanced approach maximizing cash flow & conversion rate** |
-
-### Objection Rebuttal Script
-- **Objection**: "Est-ce que na9der nchouf l produit 9bel ma nkhellas?" (Can I inspect the parcel before paying?)
-- **Confirmation Rebuttal**: "Oui bien sûr ! Notre livreur vous remet le colis et vous pouvez ouvrir l'emballage pour vérifier la qualité du coussin avant de régler le montant."`;
-  }
-
-  // 5. CREATIVE ANGLES & HOOKS
-  if (isCreative) {
+  // 4. CONFIRMATION CALLS, WHATSAPP SCRIPTS & OBJECTION HANDLING (NO TABLE REQUIRED)
+  if (isConfirmation) {
     if (language === 'Algerian Darja' || language === 'Arabic') {
-      return `### استراتيجية الإبداع الإعلاني وصناعة الهوكات
+      return `### ${effectiveTask}: ${title}
 
-دليل الزوايا الإعلانية المباشرة لمنتج **${title}** مع سيناريوهات تصوير بالفيديو مصممة خصيصاً لخوارزميات تيك توك وإنستغرام في الجزائر.
+دليل وبروتوكول التأكيد الهاتفي السريع عبر الاتصال ورسائل الواتساب الصوتية لمنتج **${title}**، مصمم لرفع نسبة الاستلام وخفض الإلغاء في 58 ولاية.
 
-### مصفوفة الزوايا الإعلانية (Angle Matrix)
+### بروتوكول التأكيد خلال 10 دقائق
+- **الهدف**: الاتصال بالزبون في غضون 10 دقائق كحد أقصى من تسجيل الطلب عبر الموقع.
+- **التوقيت الذهبي**: من 09:30 صباحاً إلى 20:30 مساءً لتفادي الإزعاج وضمان الرد الفوري.
+- **في حالة عدم الرد**: إرسال رسالة صوتية تلقائية عبر WhatsApp + إعادة المحاولة بعد ساعتين.
 
-| اسم الزاوية | صيغة الخطاف (Hook Formula) | الفكرة البصرية | العاطفة المستهدفة |
-|-------------|----------------------------|----------------|-------------------|
-| ثورة الراحة التامة | سر التخلص من آلام الظهر أثناء الجلوس | مقارنة مقسومة بين شخص يتألم وشخص مرتاح | الراحة والفضول |
-| رفيق السائق اليومي | وداعاً لوجع الظهر في الطرقات والمسافات الطويلة | تصوير حقيقي داخل سيارة أجرة أو شاحنة | التحرر من الألم |
-| تحدي البيضة المستحيل | "هل تقدر تقعد فوق حبة بيض بلا ما تتكسر؟" | تصوير ماكرو دقيق للجلوس على بيضة نيئة | الصدمة وكسر النمط |
-| تجهيز المكتب المثالي | حوّل يوم عملك المكتبي إلى راحة متواصلة | مكتب عمل عصري مع إيماءة رضا وثقة | الإنتاجية والتحفيز |
+### سيناريو المكالمة الهاتفية بالدارجة (Phone Call Script)
+- **الموظف**: "السلام عليكم خويا/أختي [اسم الزبون]، معاك [اسم المتجر]. رانا نعيطولك بخصوص طلبيتك لـ **${title}** بسعر **${price.toLocaleString()} دج**. حابين نأكدوا معك فقط عنوان التوصيل في ولاية [اسم الولاية]."
+- **الزبون**: "نعم، هذاك هو الطلب ديالي."
+- **الموظف**: "يعطيك الصحة خويا! التوصيل راهو مضمون مع شركة الشحن لباب الدار (أو Stop-Desk). تقدر تفتح الكولي وتعاود تفحص جودة الوسادة بعينيك قبل ما تخلص عون التوصيل. واش نرسلولك قطعة وحدة ولا تستفاد من عرض حبتين بـ ${(price * 1.8).toFixed(0)} دج مع شحن مجاني؟"
+- **الزبون**: "خليه حبة وحدة / زيدني حبة ثانية."
+- **الموظف**: "ممتاز، الطرد يخرج اليوم ويوصلك في أقل من 48 ساعة بإذن الله. رقم التتبع يوصلك في SMS. شكراً لك ويومك مبارك!"
 
-### هوكات فيديو رابحة مع التوقع بالتحويل (Predicted CTR %)
+### ردود حاسمة على أهم 5 اعتراضات (Objection Rebuttals)
+1. **الاعتراض 1**: "اسكو نقدر نفتح الكولي ونشوف السلعة قبل ما نخلص؟"
+   - **الرد**: "أكيد خويا العزيز! سياسة المتجر ديالنا تعطيك الحق الكامل تفتح الطرد وتتأكد من جودة وسيليكون المنتج قدام عون التوصيل قبل دفع الدينار."
+2. **الاعتراض 2**: "خايف تكون خفيفة وما تحملش الوزن بعد سمانتين؟"
+   - **الرد**: "المنتج مصنوع من بوليمر جل طبي فائق المرونة مع ضمان الاستبدال المجاني إذا هبطت أو فقدت شكلها."
+3. **الاعتراض 3**: "التوصيل شحال يدير للولاية ديالي؟"
+   - **الرد**: "سعر التوصيل رمزي ومحدد مسبقاً، والمبلغ الإجمالي واضح بدون أي مصاريف خفية عند الاستلام."
+4. **الاعتراض 4**: "لقيت وحدة تشبهلها بسعر رخيص في بلاصة ثانية؟"
+   - **الرد**: "الوسائد المقلدة مصنوعة من بوليستر خفيف يهبط بعد يومين، وسادتنا أصلية وتتحمل تجربة البيضة المباشرة دون كسرها."
+5. **الاعتراض 5**: "راني مسافر ولا مانيش في الدار السمانة هادي؟"
+   - **الرد**: "ما كاين حتى مشكل، نقدروا نبرمجو التوصيل في اليوم والوقت اللي يساعدك، أو نحطوهالك في مكتب Stop-Desk قريب ليك وتسحبها كي تكون متفرغ."
 
-| نص الهوك الإعلاني | نسبة النقر المتوقعة | صيغة الفيديو | الأولوية |
-|-------------------|---------------------|--------------|----------|
-| "يا خويا عييت من وجع الظهر كي تسوق بزاف؟ شوف هاد الاختراع واش يقدر يدير في 30 ثانية!" | 12.5% | فيديو UGC عمودي 9:16 | P1 🔥 |
-| "شاهد التجربة بعينيك: جلسنا فوق بيضة حقيقية على هاد الوسادة... والنتيجة صدمت الجميع!" | 11.2% | نمط الصدمة (Pattern Interrupt) | P1 🔥 |
-| "التوصيل لـ 58 ولاية حتى لباب الدار، ومتخلص حتى تفتح الكولي وتشوف بعينيك الجودة!" | 9.8% | خطاف الثقة وضمان الدفع COD | P2 ⚡ |
-| "خدمتك في المكتب تعبتك في ظهرك؟ الحل الطبي راهو هنا وبسعر مناسب بزاف." | 8.6% | مشكلة - حل مباشر | P3 🎯 |
-
-### سيناريو القصة البصرية (Visual Storyboard Flow)
-\`\`\`
-المرحلة 1 (0-3 ثوانٍ): كسر النمط السريع (وضع بيضة والجلوس فوقها مباشرة دون مقدمات).
-المرحلة 2 (4-10 ثوانٍ): إثبات المشكلة (توضيح ضغط الكراسي العادية على العمود الفقري).
-المرحلة 3 (11-20 ثانية): إبراز الجودة (المرونة، الغطاء القابل للغسل، البرودة المستمرة).
-المرحلة 4 (21-30 ثانية): الحث على الطلب (عرض السعر ${price.toLocaleString()} دج مع ضمان المعاينة قبل الدفع).
-\`\`\``;
+### قالب الرسالة الصوتية عبر الواتساب (WhatsApp Voice Note)
+- "السلام عليكم أخي الكريم، نتصل بك من طرف متجرنا بخصوص طلبك لـ **${title}**. رانا جهزنالك الطرد باش يخرج اليوم. فقط أكدلي برد بسيط على هاد الميساج حتى ننطلق في التوصيل لولايتك. شكراً ليك!"`;
     }
 
-    return `### Creative Angles & Viral Hooks Engine
+    return `### ${effectiveTask}: ${title}
 
-Production-ready direct-response creative frameworks for **${title}**, engineered for high hook retention and low cost-per-click across Meta & TikTok feeds.
+Comprehensive phone confirmation framework and WhatsApp voice dispatch protocol for **${title}**, engineered to push COD delivery rates past 85% across all 58 Algerian Wilayas.
 
-### Creative Angle Matrix
+### Rapid 10-Minute Confirmation Protocol
+- **Target Response Time**: Call customer within 10 minutes of web form submission.
+- **Golden Calling Window**: 09:30 AM – 08:30 PM local Algerian time.
+- **Fallback Action**: Automated WhatsApp voice note sent immediately after 1st unanswered call, followed by 2nd attempt in 120 minutes.
 
-| Angle Name | Hook Formula | Visual Concept | Emotion Targeted |
-|-------------------|---------------------------------|----------------|--------------------|
-| Comfort Revolution | "Discover the secret to pain-free daily sitting!" | Split-screen contrasting stiff posture vs instant comfort | Relief & Curiosity |
-| Driver's Daily Relief | "Say goodbye to back pain on every commute!" | In-car POV camera testing on uneven roads | Freedom & Relief |
-| The Unbreakable Egg Test | "Can you sit directly on an egg without breaking it?" | High-tension macro test sitting on a raw egg | Shock & Pattern Interrupt |
-| Workplace Upgrade | "Transform your stressful 8-hour workday into pure comfort!" | Clean office setup with energetic professional nod | Motivation & Status |
+### Word-for-Word Phone Confirmation Script
+- **Agent**: "Hello Mr./Ms. [Customer Name], this is [Agent Name] calling from [Store Name] regarding your order for the **${title}** at **${price.toLocaleString()} DZD**. I'm calling to verify your exact delivery address in [Wilaya / Commune]."
+- **Customer**: "Yes, that's my order."
+- **Agent**: "Perfect! Your package includes door-to-door courier delivery and full parcel inspection rights — you can open the box and verify the honeycomb gel quality with the driver before paying cash. By the way, would you like to take advantage of our 2-piece family bundle today for only ${(price * 1.8).toFixed(0)} DZD with free national delivery?"
+- **Customer**: "Just the single unit / Add the bundle."
+- **Agent**: "Excellent. Your tracking code will be sent via SMS once dispatched this afternoon. Expect delivery within 24 to 48 hours. Thank you for your trust!"
 
-### Viral Hook Scripts with Predicted CTR %
+### Top 5 Customer Objections & Word-for-Word Rebuttals
+1. **"Can I open and inspect the parcel before paying the courier?"**
+   - **Rebuttal**: "Yes, 100%! Our courier agreement guarantees open-box inspection. You check the medical polymer quality before handing over any payment."
+2. **"Will it flatten out or lose shape after a couple weeks?"**
+   - **Rebuttal**: "No. This uses medical-grade hyper-elastic polymer that springs back instantly. It comes with a 1-year shape retention guarantee."
+3. **"Is shipping included in the price?"**
+   - **Rebuttal**: "The total amount confirmed right now is final — no hidden fees or extra surcharges upon delivery."
+4. **"I saw a similar product online for cheaper."**
+   - **Rebuttal**: "Cheap knockoffs use generic sponge foam that sags immediately. Ours is genuine dual-layer honeycomb gel capable of the unbroken egg demonstration."
+5. **"I am currently traveling / not home."**
+   - **Rebuttal**: "No problem at all! We can hold dispatch to your preferred date, or deliver to your nearest Yalidine/ZR Stop-Desk branch for convenient pickup anytime."
 
-| Hook Script | Predicted CTR % | Format | Priority |
-|-------------------|-----------------|--------|----------|
-| "Stop scrolling if you drive or sit more than 4 hours a day — this changes everything!" | 12.8% | UGC Vertical 9:16 | P1 🔥 |
-| "We put a raw egg on this cushion and sat on it... watch what happened!" | 11.4% | Shock Pattern Interrupt | P1 🔥 |
-| "Doorstep delivery across all 58 Wilayas: open and verify the parcel before paying!" | 9.6% | COD Trust & Guarantee | P2 ⚡ |
-| "Why tolerate lower back pain when modern ergonomic polymer fixes it for ${price} DZD?" | 8.4% | Problem-Agitation | P3 🎯 |
-
-### Visual Storyboard Flow
-\`\`\`
-Step 1 (0-3s): Pattern Interrupt (Sudden close-up raw egg test demonstration).
-Step 2 (4-10s): Problem Agitation (Showing severe pressure on tailbone from rigid seats).
-Step 3 (11-20s): Product Utility (Showing breathable honeycomb flex & washable cover).
-Step 4 (21-30s): Irresistible Offer (Special price ${price.toLocaleString()} DZD with 58 Wilaya COD).
-\`\`\``;
+### WhatsApp Voice Note Dispatch Template
+- "Hello [Customer Name]! This is [Store Name] regarding your verified order of **${title}**. We have your order packed and scheduled for courier dispatch today. Please reply with a quick 'CONFIRM' or your preferred delivery day so our driver can head your way. Thank you!"`;
   }
 
-  // 6. CAMPAIGN & MEDIA BUYING
+  // 5. CUSTOMER AVATAR & BUYER PSYCHOGRAPHICS (NO TABLE REQUIRED)
+  if (isAvatar) {
+    return `### ${effectiveTask}: ${title}
+
+In-depth psychological profiling, emotional triggers, and core buyer personas for **${title}** in the Algerian e-commerce market.
+
+### Primary Persona: The High-Commute Professional & Long-Shift Driver
+- **Demographic**: Male / Female, 28–58 years old, urban and suburban Algeria (Algiers, Oran, Constantine, Sétif, Blida).
+- **Occupation**: Taxi/VTC driver, long-distance hauler, public servant, IT/office desk professional.
+- **Daily Reality**: Spends 6 to 11 hours seated every day on unforgiving foam or rigid car seats.
+
+### Core Pain Points & Acute Daily Frustrations
+- Chronic lower back stiffness and severe coccyx / tailbone numbness at the end of each workday.
+- Excessive seat heat and perspiration during warm Algerian months, causing physical irritation.
+- Recurring expenses on painkiller medication and cheap foam cushions that sink and deform within 10 days.
+
+### Deep Emotional Desires & Status Motivators
+- **Immediate Physical Relief**: Ending the shift without groaning in pain when stepping out of the vehicle or chair.
+- **Productivity & Focus**: Working uninterrupted hours without fidgeting to find a comfortable sitting posture.
+- **Smart Investment Pride**: Owning an orthopedic tool that lasts years without breaking down.
+
+### Conversion Triggers & Messaging Angles
+- **The "Egg Test" Proof**: Pattern-interrupt demonstrating zero pressure point transfer onto fragile items.
+- **"Pay Only After Inspection" (المعاينة قبل الدفع)**: Completely eliminates COD skepticism and builds instant trust.
+- **Wilaya Delivery Assurance**: Clear promise of doorstep delivery to 58 Wilayas within 48 hours.`;
+  }
+
+  // 6. CREATIVE ANGLES & VIDEO HOOKS (NO TABLE REQUIRED)
+  if (isCreative) {
+    if (language === 'Algerian Darja' || language === 'Arabic') {
+      return `### ${effectiveTask}: ${title}
+
+دليل الزوايا الإعلانية المباشرة وصناعة الهوكات الفيروسية لمنتج **${title}**، مصمم خصيصاً لإعلانات تيك توك وإنستغرام وفيسبوك في الجزائر.
+
+### 4 هوكات إعلانية فيروسية عالية التحويل
+1. **هوك كسر النمط (Pattern Interrupt - The Egg Test)**
+   - **الصورة البصرية**: تصوير ماكرو مقرب جداً لوضع حبة بيض نيئة فوق الوسادة والجلوس فوقها مباشرة بوزن 90 كغ.
+   - **الصوت بالدارجة**: "زعما تقدر تقعد فوق حبة بيض بلا ما تتكسر؟ شاهد واش صرا كي جربنا هاد الاختراع العجيب!"
+2. **هوك استهداف السائقين (Driver Commute Agitation)**
+   - **الصورة البصرية**: سائق يمسك أسفل ظهره بألم وهو ينزل من سيارة أجرة بعد مشوار طويل.
+   - **الصوت بالدارجة**: "يا خويا عييت من السواقة ووجع الظهر والـ Sciatique كل يوم؟ دقيقة وحدة قادرة تبدل يومك كامل!"
+3. **هوك الثقة والمعاينة (COD Trust & Proof)**
+   - **الصورة البصرية**: عون التوصيل يسلم الطرد، والزبون يفتح العلبة بابتسامة ويتفحص مرونة الجل السيليكوني.
+   - **الصوت بالدارجة**: "التوصيل حتى لباب دارك لـ 58 ولاية، ومتخلص حتى فرنك حتى تفتح الكولي وتشوف بعينيك!"
+4. **هوك الموظفين والعمل المكتبي (Desk Worker Relief)**
+   - **الصورة البصرية**: موظف مكتبي يرمي الوسادة الإسفنجية القديمة ويجلس بارتياح تام على الوسادة الجديدة.
+   - **الصوت بالدارجة**: "8 سوايع خدمة في المكتب بلا وجع ظهر؟ هادا هو السر اللي راهو دارج في 2026!"
+
+### سيناريو فيديو إعلاني كامل مدته 30 ثانية (Video Script)
+- **00:00 - 00:03 (الخطاف السريع)**:
+  - *الصورة*: لقطة صادمة للجلوس على بيضة فوق الوسادة ثم رفعها سليمة 100%.
+  - *الصوت*: "واش صرا للبيضة؟ والو! لأن هاد الجل الطبي يمتص كل وزن جسمك في ثانية."
+- **00:04 - 00:10 (إبراز المشكلة)**:
+  - *الصورة*: شخص جالس على كرسي صلب يتألم من العمود الفقري وأسفل الظهر.
+  - *الصوت*: "الكراسي العادية تضغط على عظام الحوض وتسبب آلام مزمنة في الظهر والرقبة."
+- **00:11 - 00:20 (الحل والتجربة)**:
+  - *الصورة*: استعراض خلايا النحل المرنة، الغطاء الشبكي القابل للغسل، وتثبيتها داخل السيارة وعلى كرسي المكتب.
+  - *الصوت*: "تصميم خلايا النحل يخلي الهواء يدور ويحافظ على برودة مقعدك، وما تهبطش حتى بعد سنين من الاستعمال."
+- **00:21 - 00:30 (العرض والدعوة للطلب)**:
+  - *الصورة*: كتابة السعر **${price.toLocaleString()} دج** بخط واضح مع شارة "المعاينة قبل الدفع".
+  - *الصوت*: "الطلب راهو متاح الآن بسعر خاص والتوصيل سريع لـ 58 ولاية. اضغط على الزر تحت واطلب درك قبل نفاد الكمية!"`;
+    }
+
+    return `### ${effectiveTask}: ${title}
+
+Direct-response viral creative blueprints and video hook scripts for **${title}**, engineered for high CTR and low acquisition costs on Meta Advantage+ and TikTok.
+
+### 4 High-Converting Viral Hooks
+1. **Hook 1: The Raw Egg Pattern Interrupt**
+   - **Visual Action**: Macro close-up placing a fragile raw egg on the cushion, followed by a 90kg adult sitting directly on it.
+   - **Voiceover**: "Can you sit directly on a raw egg without cracking it? Watch what happens when we test this honeycomb polymer!"
+2. **Hook 2: The Driver Sciatica Callout**
+   - **Visual Action**: POV driver groaning in tailbone pain after stepping out of a traffic jam, then placing the cushion on the car seat.
+   - **Voiceover**: "Stop scrolling if you drive more than 3 hours a day. This one simple fix eliminates lower back stiffness instantly."
+3. **Hook 3: COD Inspection Trust Hook**
+   - **Visual Action**: Happy customer at doorstep opening the courier parcel and flexing the durable silicone cushion before handing over cash.
+   - **Voiceover**: "Doorstep delivery across all 58 Wilayas — and you don't pay a single Dinar until you open and inspect it yourself!"
+4. **Hook 4: Desk Ergonomic Upgrade**
+   - **Visual Action**: Split-screen showing slouching on flat foam vs erect, effortless posture on the honeycomb cushion.
+   - **Voiceover**: "Transform rigid office chairs into all-day orthopedic comfort for just ${price.toLocaleString()} DZD."
+
+### Full 30-Second Video Ad Script
+- **00:00 - 00:03 (Pattern Interrupt Hook)**:
+  - *Visual*: Rapid cut to the unbroken egg test demonstration with dramatic sound effect.
+  - *Voiceover*: "Zero pressure points. That's why the egg never breaks."
+- **00:04 - 00:10 (Pain Agitation)**:
+  - *Visual*: Anatomical graphic illustrating tailbone compression from standard seats.
+  - *Voiceover*: "Standard foam cushions trap heat and collapse, leaving your spine absorbing all the road vibration."
+- **00:11 - 00:20 (Demonstration & Proof)**:
+  - *Visual*: Flexing the resilient polymer matrix, highlighting the non-slip cover and breathable airflow vents.
+  - *Voiceover*: "The hyper-elastic gel distributes body weight evenly, keeping you cool and pain-free through 10-hour shifts."
+- **00:21 - 00:30 (Irresistible Offer & CTA)**:
+  - *Visual*: On-screen price tag: **${price.toLocaleString()} DZD** (or 2 for ${(price * 1.8).toFixed(0)} DZD) with 58 Wilaya COD badge.
+  - *Voiceover*: "Click below to claim yours today with doorstep delivery and inspect-before-you-pay guarantee!"`;
+  }
+
+  // 7. COMPETITOR INTELLIGENCE & BENCHMARKING (DEDICATED TABLE)
+  if (isCompetitor) {
+    return `### ${effectiveTask}: ${title}
+
+Comprehensive competitive landscape, pricing benchmarks, and market differentiation strategy for **${title}** in Algeria.
+
+### Competitor Landscape & Benchmarks
+
+| Competitor / Store Archetype | Selling Price | Delivery Terms | Observed Weakness | Our Strategic Advantage |
+|------------------------------|---------------|----------------|-------------------|-------------------------|
+| Generic Drop-shipper Ads | 3,200 DZD | Paid Shipping (+600 DZD) | No inspection allowed, low-grade foam copy | Full open-box inspection guaranteed before payment |
+| Marketplace Stores (Ouedkniss) | 3,900 DZD | Stop-Desk Only | Slow dispatch (3-5 days), stockout delays | Stocked locally in Algiers & Blida; 24-48h delivery |
+| Medical Equipment Pharmacies | 5,500 DZD | In-store pickup only | High retail markup, zero doorstep delivery | Direct-to-consumer pricing at ${price.toLocaleString()} DZD |
+| Our Brand Strategy | ${price.toLocaleString()} DZD | Doorstep 58 Wilayas | None (Streamlined COD execution) | Egg-test video proof + 2-pack bundle at ${(price * 1.8).toFixed(0)} DZD |
+
+### Market Gap & Dominance Strategy
+- **Demonstration Vacuum**: Competitors run static images or stolen low-res clips. Shooting authentic Algerian UGC with the egg test wins the feed immediately.
+- **Bundle Advantage**: Offering a 2-Pack Duo Cushion for ${(price * 1.8).toFixed(0)} DZD captures multi-car and home+office buyers, increasing Average Order Value (AOV) by +35%.`;
+  }
+
+  // 8. PRICING & UNIT ECONOMICS (DEDICATED TABLE)
+  if (isPricing) {
+    return `### ${effectiveTask}: ${title}
+
+Financial modeling, landed cost breakdown, break-even thresholds, and wilaya revenue projections for **${title}**.
+
+### Unit Economics Breakdown
+
+| Cost Component | Value (DZD) | % of Price | Strategic Notes |
+|----------------|-------------|------------|-----------------|
+| Selling Price (Single Unit) | ${price.toLocaleString()} DZD | 100.0% | Optimized impulse-purchase price point |
+| Wholesale COGS (Landed) | ${cost.toLocaleString()} DZD | ${((cost / price) * 100).toFixed(1)}% | Landed cost from wholesale supplier |
+| Courier Delivery Fee (Average) | 450 DZD | 11.8% | Blended rate across 58 Wilayas |
+| Confirmation Call & SMS | 150 DZD | 3.9% | Rapid 10-minute call center & WhatsApp alert |
+| Packaging & Protective Wrap | 100 DZD | 2.6% | Reinforced polybag + user instruction insert |
+| RTO Loss Reserve (12% Return Buffer) | 185 DZD | 4.9% | Covers return freight on refused deliveries |
+| Target Ad Spend Allowance (CPA) | 600 DZD | 15.8% | Meta & TikTok Ads acquisition target |
+| **Net Profit per Delivered Order** | **${Math.max(profit - 1485, 950).toLocaleString()} DZD** | **${(Math.max(profit - 1485, 950) / price * 100).toFixed(1)}%** | **Pure bottom-line net profit (+${margin}% Gross Margin)** |
+
+### Top Wilayas Projected Revenue Distribution
+
+| Wilaya / Region | Projected Monthly Orders | Unit Price | Total Revenue (DZD) | % Share |
+|-----------------|--------------------------|------------|---------------------|---------|
+| Wilaya 16 - Alger | 140 Orders | ${price} DZD | ${(price * 140).toLocaleString()} DZD | 35% |
+| Wilaya 31 - Oran | 90 Orders | ${price} DZD | ${(price * 90).toLocaleString()} DZD | 22% |
+| Wilaya 19 - Sétif | 70 Orders | ${price} DZD | ${(price * 70).toLocaleString()} DZD | 17% |
+| Wilaya 25 - Constantine | 55 Orders | ${price} DZD | ${(price * 55).toLocaleString()} DZD | 14% |
+| Other 54 Wilayas | 45 Orders | ${price} DZD | ${(price * 45).toLocaleString()} DZD | 12% |
+
+### Break-Even ROAS Targets
+- **Minimum Break-Even ROAS**: **1.65x**
+- **Target Scaling ROAS**: **3.10x+**`;
+  }
+
+  // 9. LOGISTICS & COURIER PERFORMANCE (DEDICATED TABLE)
+  if (isLogistics) {
+    return `### ${effectiveTask}: ${title}
+
+Operational fulfillment blueprint, courier delivery rates, and return-to-origin (RTO) suppression protocols for **${title}** across 58 Algerian Wilayas.
+
+### Courier Performance Matrix
+
+| Courier Partner | Delivery Rate % | Avg Transit Days | Stop-Desk Cost | Home Delivery | Strategic Role |
+|-----------------|-----------------|------------------|----------------|---------------|----------------|
+| Yalidine Express | 89.4% | 1.8 Days | 350 DZD | 550 DZD | 🟢 Primary National Partner |
+| ZR Express | 86.8% | 2.0 Days | 300 DZD | 500 DZD | 🟢 Urban Metro Specialist |
+| Nord & Sud Express | 81.2% | 3.5 Days | 450 DZD | 750 DZD | 🟡 South & Sahara Wilayas |
+
+### Root Causes of Refused Deliveries & Actionable Fixes
+1. **Unreachable on Phone (39% of RTOs)**: Collect secondary mobile number on checkout form; dispatch WhatsApp voice reminder upon shipment.
+2. **Delivery Delay > 48 Hours (30% of RTOs)**: Hand parcels to courier sorting hubs before 16:00 daily to ensure next-day movement.
+3. **Customer Hesitation (19% of RTOs)**: Reiterate the inspect-before-paying guarantee in confirmation audio and SMS.
+4. **Refusal to Pay Delivery Fee (12% of RTOs)**: Always confirm the all-inclusive final price during the phone confirmation call.`;
+  }
+
+  // 10. CAMPAIGN ARCHITECTURE & MEDIA BUYING (DEDICATED TABLE)
   if (isCampaign) {
-    return `### Campaign Architecture & Media Buying Strategy
+    return `### ${effectiveTask}: ${title}
 
-Full-funnel campaign blueprint for scaling **${title}** across Meta Advantage+ and TikTok Ads Manager in the Algerian market.
+Paid acquisition blueprint and budget distribution for scaling **${title}** across Meta Ads and TikTok Ads in the Algerian market.
 
-### Campaign Budget Allocation
+### Campaign & AdSet Budget Allocation
 
-| Campaign | Daily Budget (DZD) | % Share | Objective |
-|----------------|---------------------|---------|-------------------|
-| CBO Broad Testing (All 58 Wilayas) | 3,000 | 50% | Purchase Conversions |
-| High-Intent Interest Stack (Ergonomics, Drivers) | 2,000 | 33% | Qualified Buyers |
-| Retargeting & Duo Bundle Campaign | 1,000 | 17% | AOV Maximization |
+| Campaign / AdSet | Daily Budget (DZD) | % Share | Audience Targeting | Target CPA |
+|------------------|---------------------|---------|--------------------|------------|
+| CBO Broad Scaling (All 58 Wilayas) | 3,500 DZD | 50% | Men & Women 25-60, Broad Demographics | < 550 DZD |
+| High-Intent Interest Stack | 2,000 DZD | 29% | Drivers, Ergonomics, Office Chairs, Orthopedics | < 600 DZD |
+| Retargeting & Duo Bundle Campaign | 1,500 DZD | 21% | Video Viewers 75% & Cart Abandoners | < 450 DZD |
 
 ### Funnel Performance Benchmarks
-
-| Metric | Benchmark | Target Rate | Status 🟢🟡🔴 | Action |
-|--------|-----------|-------------|----------------|--------|
-| CTR (Click-Through) | > 1.5% | 2.2% | 🟢 | Scale winning 3-second hook creatives |
-| CPC (Cost per Click) | < 30 DZD | 22 DZD | 🟢 | Expand into broad demographic targeting |
-| CPM (Cost per 1k Imp) | < 1,600 DZD | 1,380 DZD | 🟢 | Keep engagement signals high |
-| LPV Rate (Page Load) | > 70% | 78% | 🟢 | Maintain ultra-fast mobile landing page |
-| ATC Rate (Add to Cart) | > 15% | 19% | 🟢 | Keep 1-page COD checkout form with Wilaya dropdown |
-
-\`\`\`
-Ad Impressions (100,000)
-   └─ Clicks (2,200 @ 2.2% CTR)
-      └─ Landing Page Visits (1,716 @ 78% LPV)
-         └─ Form Submissions (326 @ 19% CVR)
-            └─ Confirmed Delivered Orders (267 @ 82% Delivery Rate)
-\`\`\``;
+- **Target Click-Through Rate (CTR)**: > 2.2% (driven by the egg-test hook).
+- **Target Cost per Click (CPC)**: < 25 DZD on Meta Feed / TikTok.
+- **Landing Page Conversion Rate (CVR)**: > 16% on streamlined 1-page COD form.
+- **Delivery Confirmation Rate**: > 84% post-phone call.`;
   }
 
-  // 7. PRICING & UNIT ECONOMICS
-  if (isPricing) {
-    return `### Financial Intelligence & Unit Economics Breakdown
+  // 11. QUALITY CONTROL & PACKAGING CHECKLIST (NO TABLE REQUIRED)
+  if (isQuality) {
+    return `### ${effectiveTask}: ${title}
 
-Comprehensive margin analysis, break-even thresholds, and wilaya revenue distribution for **${title}**.
+Comprehensive quality control specifications, warehouse inspection checklist, and transit-safe packaging guidelines for **${title}**.
 
-### Unit Economics Breakdown Table
+### Product Acceptance Specifications
+- **Polymer Elasticity**: Grade-A medical gel with instant rebound elasticity and zero permanent indentation.
+- **Honeycomb Cell Integrity**: Clean hexagonal cellular molding without tears, thinning, or residual manufacturing odor.
+- **Cover Durability**: Breathable poly-mesh zippered sleeve with reinforced double-stitching and anti-skid bottom friction studs.
 
-| Metric | Value (DZD) | Formula / Component |
-|-----------------|-------|---------------------------------------|
-| Selling Price | ${price.toLocaleString()} DZD | Average Selling Price |
-| COGS (Product Cost) | ${cost.toLocaleString()} DZD | Landed Wholesale Purchase Cost |
-| Shipping Allowance | 450 DZD | Weighted average courier fee across Algeria |
-| Confirmation Call Cost | 150 DZD | Tele-operator & automated SMS protocol |
-| RTO Cost Reserve (12%) | 185 DZD | Return freight & repackaging buffer |
-| Target Ad Spend per Order | 600 DZD | Acquisition allowance on Meta / TikTok |
-| **Net Profit per Order** | **${Math.max(profit - 1385, 900).toLocaleString()} DZD** | **Selling Price - Complete Cost Stack (+${margin}% Gross Margin)** |
-
-### Top Wilayas Revenue Distribution
-
-| Wilaya / Region | Projected Orders | Basket Size | Total Revenue (DZD) | % Share |
-|-----------------|------------------|-------------|---------------------|---------|
-| Wilaya 16 - Alger | 120 | ${price} DZD | ${(price * 120).toLocaleString()} DZD | 35% |
-| Wilaya 31 - Oran | 80 | ${price} DZD | ${(price * 80).toLocaleString()} DZD | 24% |
-| Wilaya 19 - Sétif | 60 | ${price} DZD | ${(price * 60).toLocaleString()} DZD | 18% |
-| Wilaya 25 - Constantine | 45 | ${price} DZD | ${(price * 45).toLocaleString()} DZD | 13% |
-| Other 54 Wilayas | 35 | ${price} DZD | ${(price * 35).toLocaleString()} DZD | 10% |
-
-### Break-Even ROAS Target
-- **Break-Even ROAS**: **1.75x**
-- **Target Scaling ROAS**: **3.20x+**`;
+### Warehouse Packaging & Inspection Checklist
+- [ ] Verify gel cushion core is completely free of surface punctures or oil exudation.
+- [ ] Inspect zipper slider functionality on cover across 3 complete open/close cycles.
+- [ ] Insert laminated "Quick-Start & Orthopedic Care Guide" inside the inner box.
+- [ ] Seal parcel inside waterproof, tear-resistant courier polybag.
+- [ ] Print and firmly affix barcoded shipping label with customer phone number 1 and backup phone number 2.
+- [ ] Scan parcel into courier pickup dispatch batch before 16:00 daily cutoff.`;
   }
 
-  // 8. LOGISTICS & RTO MITIGATION
-  if (isLogistics) {
-    return `### Logistics, Courier Performance & RTO Suppression
+  // 12. DEFAULT / GENERAL SKILL STRATEGY (NO FORCED TABLE)
+  return `### ${effectiveTask}: ${title}
 
-Operational fulfillment protocol for **${title}** across 58 Algerian Wilayas.
+Executive strategic breakdown and actionable implementation directives for **${title}** in the ${niche} vertical.
 
-### Courier Delivery Performance
+### Executive Overview & Strategic Assessment
+The commercial viability of **${title}** in the Algerian e-commerce market is driven by high pain-point severity combined with immediate visual proof. Priced at **${price.toLocaleString()} DZD** with a landed wholesale cost of **${cost.toLocaleString()} DZD** (+${margin}% gross margin, +${profit.toLocaleString()} DZD gross profit), this product provides strong economic insulation against customer acquisition costs and logistics variances.
 
-| Courier Partner | Delivery Rate % | Avg Transit Days | Cost (DZD) | Operational Status |
-|-----------------|-----------------|------------------|------------|-------------------|
-| Yalidine Express | 89.4% | 1.8 Days | 450 | 🟢 Primary National Partner |
-| ZR Express | 86.8% | 2.0 Days | 400 | 🟢 Urban Metro Specialist |
-| Nord & Sud Express | 81.2% | 3.5 Days | 650 | 🟡 South / Remote Wilayas |
+### Core Strategic Directives
+- **Direct-Response Angle**: Lead with instant physical demonstration (e.g. pressure dispersion test) rather than abstract features.
+- **Pricing & Offer Architecture**: Anchor single unit at ${price.toLocaleString()} DZD; aggressively cross-sell the 2-pack bundle at ${(price * 1.8).toFixed(0)} DZD with free national delivery to maximize Average Order Value.
+- **Trust & Friction Removal**: Explicitly advertise "Inspect Parcel Before Paying" (المعاينة قبل الدفع) across creative captions and confirmation calls to slash customer hesitation.
+- **Logistics Tightening**: Enforce a 10-minute phone and WhatsApp confirmation window to ensure high courier acceptance rates across all 58 Wilayas.
 
-### RTO Failure Root Cause Analysis
-
-| Failure Reason | % of RTOs | Cumulative % | Priority | Actionable Fix |
-|----------------|-----------|--------------|----------|----------------|
-| Customer Unreachable on Phone | 39% | 39% | 1 | Collect 2 phone numbers on order form |
-| Delivery Delay (> 48h) | 30% | 69% | 2 | Dispatch parcels within 4 hours of phone confirmation |
-| Customer Impulsive Regret | 19% | 88% | 3 | Send WhatsApp voice confirmation reassuring guarantee |
-| Refusal to Pay Shipping | 12% | 100% | 4 | Explicitly confirm total price with shipping included |
-
-### Return Reduction Priority Matrix
-
-| Corrective Action | Impact (1-5) | Effort (1-5) | Priority |
-|-------------------|--------------|--------------|----------|
-| 10-Minute Instant WhatsApp Voice Note | 5 | 2 | 🟩 High |
-| Mandatory Backup Phone Number Input | 5 | 1 | 🟩 High |
-| SMS Tracking Link upon Pickup Dispatch | 4 | 2 | 🟩 High |
-| Wilaya-specific Stop-Desk Guidance | 4 | 3 | 🟨 Medium |`;
-  }
-
-  // 9. DEFAULT / GENERAL SKILL INTELLIGENCE
-  return `### Strategic Intelligence: ${taskType}
-
-Executive strategic breakdown for **${title}** in the ${niche} category.
-
-### Opportunity & Performance Overview
-
-| 🎯 Evaluation Metric | Value | Strategic Assessment |
-|----------------------|-------|----------------------|
-| Market Feasibility | 8.8/10 | High alignment with Algerian Cash on Delivery consumer demand |
-| Margin Viability | +${margin}% | Generous unit margin (+${profit.toLocaleString()} DZD) absorbs advertising costs |
-| Logistics Feasibility | 88% Delivery | Unbreakable polymer construction minimizes shipping damage |
-| Launch Readines | Immediate | Standard SKU with established local supplier availability |
-
-### Core Strategic Focus
-- **Target Pricing**: ${price.toLocaleString()} DZD for single unit, ${(price * 1.8).toFixed(0)} DZD for 2-pack bundle.
-- **Acquisition Angle**: Focus on demonstration of pressure relief and verified delivery across 58 Wilayas.
-- **Fulfillment Protocol**: 10-minute confirmation audio call to suppress return-to-origin rates under 12%.`;
+### Step-by-Step Implementation Roadmap
+1. **Supplier Lock-in**: Secure 100 units initial local wholesale stock with verified Grade-A elastic polymer quality.
+2. **Creative Production**: Film 4 direct-response hooks highlighting the contrast between rigid seats and instant honeycomb comfort.
+3. **Streamlined COD Funnel**: Deploy high-speed mobile landing page with 1-page Wilaya dropdown checkout.
+4. **Ad Launch Phase**: Allocate 3,500 DZD/day CBO campaign on Meta Advantage+ testing 3 video angles.
+5. **Confirmation & Dispatch**: Process all incoming orders within 10 minutes via standardized phone and WhatsApp audio protocols.`;
 }
 
 // Vite middleware in dev or static files in production
@@ -3475,7 +3572,10 @@ async function startServer() {
   if (isDev) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: process.env.DISABLE_HMR === 'true' ? false : undefined,
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -3486,8 +3586,12 @@ async function startServer() {
     });
   }
 
-  app.listen(port, '0.0.0.0', () => {
-    console.log(`Product Intelligence OS server running on http://localhost:${port}`);
+  const server = app.listen(port, '0.0.0.0', () => {
+    console.log(`Product Intelligence OS server running on http://0.0.0.0:${port}`);
+  });
+
+  server.on('error', (err: any) => {
+    console.error('Server listen error:', err);
   });
 }
 

@@ -294,17 +294,25 @@ export function analyzeContent(
   const risksAndCaveats: string[] = [];
   let conclusion = '';
 
-  // 1. Detect Title (Product Name / Subject)
-  const productMatch = rawContent.match(/(?:Product\s*name|Target\s*Product|Title|Subject):\s*([^\n\r]+)/i);
-  if (productMatch && productMatch[1]) {
-    title = productMatch[1].replace(/[*_#]/g, '').trim();
+  // 1. Detect Title (What was searched / Product Name / Subject)
+  if (fallbackTitle && fallbackTitle !== 'Analysis Report') {
+    title = fallbackProduct && !fallbackTitle.toLowerCase().includes(fallbackProduct.toLowerCase())
+      ? `${fallbackTitle} — ${fallbackProduct}`
+      : fallbackTitle;
   } else {
-    // Check first H1/H2
-    const headingMatch = rawContent.match(/^#+\s*(.+)$/m);
-    if (headingMatch && headingMatch[1]) {
-      title = headingMatch[1].replace(/[*_]/g, '').trim();
+    const productMatch = rawContent.match(/(?:Product\s*name|Target\s*Product|Title|Subject):\s*([^\n\r]+)/i);
+    if (productMatch && productMatch[1]) {
+      title = productMatch[1].replace(/[*_#]/g, '').trim();
     } else {
-      title = fallbackProduct || fallbackTitle;
+      // Check first H1/H2/H3
+      const headingMatch = rawContent.match(/^#+\s*(.+)$/m);
+      const cand = headingMatch && headingMatch[1] ? headingMatch[1].replace(/[*_]/g, '').trim() : '';
+      const isGeneric = !cand || ['summary', 'keypoints', 'overview', 'strategic intelligence', 'résumé', 'ملخص'].includes(cand.toLowerCase());
+      if (cand && !isGeneric) {
+        title = cand;
+      } else {
+        title = fallbackProduct || fallbackTitle;
+      }
     }
   }
 
@@ -2120,14 +2128,18 @@ export const UniversalContentEngine: React.FC<UniversalContentEngineProps> = ({
                   </div>
 
                   <h3 className="text-base sm:text-lg font-black text-white leading-tight tracking-tight mt-1">
-                    {parsedData.title}
+                    {skillTitle && (parsedData.title.toLowerCase().includes('summary') || parsedData.title.toLowerCase().includes('strategic intelligence') || !parsedData.title)
+                      ? (productTitle && !skillTitle.toLowerCase().includes(productTitle.toLowerCase()) ? `${skillTitle} — ${productTitle}` : skillTitle)
+                      : parsedData.title || skillTitle || 'Intelligence Report'}
                   </h3>
 
-                  {parsedData.subtitle && (
-                    <p className="text-xs text-indigo-200/90 leading-normal font-medium">
-                      {parsedData.subtitle}
-                    </p>
-                  )}
+                  <p className="text-xs text-indigo-200/90 leading-normal font-medium">
+                    {parsedData.subtitle && !parsedData.subtitle.toLowerCase().includes('analysis report') && !parsedData.subtitle.toLowerCase().includes('generated research')
+                      ? parsedData.subtitle
+                      : category
+                      ? `${category} • E-commerce Intelligence`
+                      : 'AI Intelligence'}
+                  </p>
                 </div>
 
                 {executedAt && (

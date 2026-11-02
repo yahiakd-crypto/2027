@@ -107,6 +107,7 @@ import {
   CustomSkillItem,
   FileType,
   DEFAULT_UPLOADED_FILES,
+  SavedPromptItem,
 } from '../../types/board';
 import {
   loadBoardProjectsFromStorage,
@@ -290,6 +291,7 @@ export const BoardPage: React.FC<BoardPageProps> = ({ onNavigateHome, onNavigate
   const [copiedSnippetKey, setCopiedSnippetKey] = useState<string | null>(null);
   const [settingsModalNodeId, setSettingsModalNodeId] = useState<string | null>(null);
   const [settingsActiveTab, setSettingsActiveTab] = useState<'config' | 'prompt' | 'options' | 'typography'>('config');
+  const [activePromptModalTabId, setActivePromptModalTabId] = useState<string | null>(null);
   const [styleAppliedAllToast, setStyleAppliedAllToast] = useState(false);
   const [activeBottomResultNodeId, setActiveBottomResultNodeId] = useState<string | null>(null);
   const [isBottomResultOpen, setIsBottomResultOpen] = useState(true);
@@ -1778,6 +1780,107 @@ Action Plan:
     setSaveStatus('saving');
     setTimeout(() => setSaveStatus('saved'), 400);
   };
+
+  // Helper to get consistent background storage key for any node's custom prompts
+  const getSkillPromptStorageKey = (nodeTitle: string): string => {
+    return `user_saved_prompts_${nodeTitle.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+  };
+
+  // Helper to load or initialize saved prompts for any node with persistent background sync
+  const getNodeSavedPrompts = useCallback((node: BoardNode): { prompts: SavedPromptItem[]; activeId: string } => {
+    const def = getDefaultPromptForNode(node.title, node.subtitle);
+
+    // 1. Check if node.config already has savedPrompts populated
+    if (node.config.savedPrompts && Array.isArray(node.config.savedPrompts) && node.config.savedPrompts.length > 0) {
+      const activeId =
+        node.config.activePromptId && node.config.savedPrompts.some((p) => p.id === node.config.activePromptId)
+          ? node.config.activePromptId
+          : node.config.savedPrompts[0].id;
+      return { prompts: node.config.savedPrompts, activeId };
+    }
+
+    // 2. Check persistent background localStorage for this skill
+    try {
+      const key = getSkillPromptStorageKey(node.title);
+      const raw = localStorage.getItem(key);
+      const savedActiveId = localStorage.getItem(`${key}_active_id`);
+      if (raw) {
+        const parsed: SavedPromptItem[] = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const activeId =
+            savedActiveId && parsed.some((p) => p.id === savedActiveId)
+              ? savedActiveId
+              : parsed[0].id;
+          return { prompts: parsed, activeId };
+        }
+      }
+    } catch (e) {
+      console.warn('Failed reading prompt from background storage', e);
+    }
+
+    // 3. Fallback: Initialize with current customPrompt or default prompt template
+    const initialText =
+      node.config.customPrompt && node.config.customPrompt.trim().length > 0
+        ? node.config.customPrompt
+        : def;
+    const initialId = `prompt-default-${node.id}`;
+    const initialList: SavedPromptItem[] = [
+      {
+        id: initialId,
+        name: 'Default Prompt',
+        prompt: initialText,
+        createdAt: new Date().toISOString(),
+        isDefault: true,
+      },
+    ];
+    return { prompts: initialList, activeId: initialId };
+  }, []);
+
+  // Update prompts array and chosen active prompt for a node, auto-saving to state and background localStorage
+  const handleUpdatePromptsForNode = useCallback(
+    (nodeId: string, prompts: SavedPromptItem[], newActiveId?: string) => {
+      const targetNode = nodes.find((n) => n.id === nodeId);
+      if (!targetNode) return;
+
+      const effectiveActiveId =
+        newActiveId ||
+        targetNode.config.activePromptId ||
+        prompts[0]?.id;
+
+      const activePromptItem =
+        prompts.find((p) => p.id === effectiveActiveId) || prompts[0];
+      const activePromptText = activePromptItem?.prompt || '';
+
+      // 1. Update node config in active board state
+      setNodes((prev) =>
+        prev.map((n) => {
+          if (n.id !== nodeId) return n;
+          return {
+            ...n,
+            config: {
+              ...n.config,
+              savedPrompts: prompts,
+              activePromptId: effectiveActiveId,
+              customPrompt: activePromptText,
+            },
+          };
+        })
+      );
+
+      // 2. Write to persistent background storage immediately so it restores on reopen
+      try {
+        const key = getSkillPromptStorageKey(targetNode.title);
+        localStorage.setItem(key, JSON.stringify(prompts));
+        localStorage.setItem(`${key}_active_id`, effectiveActiveId);
+      } catch (e) {
+        console.warn('Error saving prompts to background storage', e);
+      }
+
+      setSaveStatus('saving');
+      setTimeout(() => setSaveStatus('saved'), 250);
+    },
+    [nodes]
+  );
 
   // Maintain stable visual screen coordinates when toggling sidebar
   const handleToggleSkillsPanel = useCallback((shouldOpen: boolean) => {
@@ -4615,8 +4718,14 @@ CRITICAL INSTRUCTION: Tailor all hooks, copies, scripts, and targeting angles sp
         ? 'meta/llama-3.3-70b-instruct'
         : 'gemini-3.8-flash');
 
+    // 3. Resolve user's chosen active prompt template (with background persistence support)
+    const { prompts: nodePrompts, activeId: nodeActiveId } = getNodeSavedPrompts(currentNode);
+    const activePromptItem = nodePrompts.find((p) => p.id === nodeActiveId) || nodePrompts[0];
+
     const rawTemplate =
-      currentNode.config.customPrompt && currentNode.config.customPrompt.trim().length > 0
+      activePromptItem && activePromptItem.prompt && activePromptItem.prompt.trim().length > 0
+        ? activePromptItem.prompt
+        : currentNode.config.customPrompt && currentNode.config.customPrompt.trim().length > 0
         ? currentNode.config.customPrompt
         : currentNode.customPromptTemplate && currentNode.customPromptTemplate.trim().length > 0
         ? currentNode.customPromptTemplate
@@ -4732,10 +4841,23 @@ Please incorporate this specific attached file data and metrics directly into yo
       const pMargin = effectiveProduct.profitMargin ? Number(effectiveProduct.profitMargin) : Math.round(((sPrice - pCost) / sPrice) * 100);
       const pProfit = sPrice - pCost;
 
+      const effectiveSkillTitle = currentNode.title || 'E-Commerce Intelligence';
       let fallbackContent = '';
 
-      if (tLower.includes('all in one') || tLower.includes('master') || tLower.includes('15-stage')) {
-        fallbackContent = `### summary
+      const isMaster = tLower.includes('all in one') || tLower.includes('master') || tLower.includes('15-stage') || tLower.includes('funnel');
+      const isConfirmation = !isMaster && (tLower.includes('confirm') || tLower.includes('phone') || tLower.includes('call') || tLower.includes('whatsapp') || tLower.includes('objection') || tLower.includes('rebuttal') || tLower.includes('tele') || tLower.includes('support'));
+      const isCompetitor = !isMaster && !isConfirmation && (tLower.includes('competitor') || tLower.includes('spy') || tLower.includes('benchmark') || tLower.includes('saturation') || tLower.includes('market analysis'));
+      const isQuality = !isMaster && !isConfirmation && (tLower.includes('packag') || tLower.includes('unboxing') || tLower.includes('qc') || tLower.includes('checklist') || tLower.includes('inspect'));
+      const isProductDiscovery = !isMaster && !isConfirmation && !isCompetitor && (tLower.includes('discovery') || tLower.includes('winning') || tLower.includes('finder') || tLower.includes('demand') || tLower.includes('trend') || tLower.includes('scout'));
+      const isDeepDive = !isMaster && !isConfirmation && !isCompetitor && (tLower.includes('deep dive') || tLower.includes('technical') || tLower.includes('spec') || tLower.includes('anatomy') || tLower.includes('quality'));
+      const isAvatar = !isMaster && !isConfirmation && !isCompetitor && (tLower.includes('avatar') || tLower.includes('persona') || tLower.includes('psychographic') || tLower.includes('buyer'));
+      const isCreative = !isMaster && !isConfirmation && (tLower.includes('creative') || tLower.includes('hook') || tLower.includes('angle') || tLower.includes('copy') || tLower.includes('video') || tLower.includes('ugc') || tLower.includes('script'));
+      const isCampaign = !isMaster && !isConfirmation && !isCompetitor && (tLower.includes('campaign') || tLower.includes('meta') || tLower.includes('tiktok') || tLower.includes('traffic') || tLower.includes('budget') || tLower.includes('media buying'));
+      const isPricing = !isMaster && !isConfirmation && !isCompetitor && (tLower.includes('pricing') || tLower.includes('economic') || tLower.includes('margin') || tLower.includes('profit') || tLower.includes('financial') || tLower.includes('cost') || tLower.includes('roas'));
+      const isLogistics = !isMaster && !isConfirmation && (tLower.includes('delivery') || tLower.includes('courier') || tLower.includes('rto') || tLower.includes('return') || tLower.includes('logistics') || tLower.includes('yalidine'));
+
+      if (isMaster) {
+        fallbackContent = `### ${effectiveSkillTitle}: ${pTitle}
 
 | Layer | Stage | Key Metric | Status 🟢🟡🔴 | #1 Next Action |
 |-------|-------|------------|----------------|----------------|
@@ -4755,7 +4877,7 @@ Please incorporate this specific attached file data and metrics directly into yo
 | 14    | AI Optimization | CPA | 🟡 | Adjust campaigns based on data |
 | 15    | New Traffic | Expansion Opportunities | 🟡 | Research new audience segments |
 
-### keyPoints
+### Key Performance Benchmarks
 
 | 🎯 Metric | Value | Why it matters |
 |-----------------|-------|---------------------------------------------------------------------|
@@ -4778,8 +4900,95 @@ USP → Value Prop → Positioning → Pricing
    │   │       └─ On-the-Go Relief
    └─ Competitive Pricing
 \`\`\``;
-      } else if (tLower.includes('discovery') || tLower.includes('winning') || tLower.includes('finder') || tLower.includes('demand') || tLower.includes('trend')) {
-        fallbackContent = `### Product Opportunity Assessment: ${pTitle}
+      } else if (isConfirmation) {
+        fallbackContent = `### ${effectiveSkillTitle}: ${pTitle}
+
+Comprehensive phone confirmation framework and WhatsApp voice dispatch protocol for **${pTitle}**, engineered to push COD delivery rates past 85% across all 58 Algerian Wilayas.
+
+### Rapid 10-Minute Confirmation Protocol
+- **Target Response Time**: Call customer within 10 minutes of web form submission.
+- **Golden Calling Window**: 09:30 AM – 08:30 PM local Algerian time.
+- **Fallback Action**: Automated WhatsApp voice note sent immediately after 1st unanswered call, followed by 2nd attempt in 120 minutes.
+
+### Word-for-Word Phone Confirmation Script
+- **Agent**: "Hello Mr./Ms. [Customer Name], this is [Agent Name] calling from [Store Name] regarding your order for the **${pTitle}** at **${sPrice.toLocaleString()} DZD**. I'm calling to verify your exact delivery address in [Wilaya / Commune]."
+- **Customer**: "Yes, that's my order."
+- **Agent**: "Perfect! Your package includes door-to-door courier delivery and full parcel inspection rights — you can open the box and verify the product quality with the driver before paying cash. By the way, would you like to take advantage of our 2-piece family bundle today for only ${(sPrice * 1.8).toFixed(0)} DZD with free national delivery?"
+- **Customer**: "Just the single unit / Add the bundle."
+- **Agent**: "Excellent. Your tracking code will be sent via SMS once dispatched this afternoon. Expect delivery within 24 to 48 hours. Thank you for your trust!"
+
+### Top 5 Customer Objections & Word-for-Word Rebuttals
+1. **"Can I open and inspect the parcel before paying the courier?"**
+   - **Rebuttal**: "Yes, 100%! Our courier agreement guarantees open-box inspection. You check the quality before handing over any payment."
+2. **"Will it flatten out or lose shape after a couple weeks?"**
+   - **Rebuttal**: "No. This uses medical-grade hyper-elastic polymer that springs back instantly. It comes with a 1-year shape retention guarantee."
+3. **"Is shipping included in the price?"**
+   - **Rebuttal**: "The total amount confirmed right now is final — no hidden fees or extra surcharges upon delivery."
+4. **"I saw a similar product online for cheaper."**
+   - **Rebuttal**: "Cheap knockoffs use generic sponge foam that sags immediately. Ours is genuine dual-layer honeycomb gel capable of the unbroken egg demonstration."
+5. **"I am currently traveling / not home."**
+   - **Rebuttal**: "No problem at all! We can hold dispatch to your preferred date, or deliver to your nearest Yalidine/ZR Stop-Desk branch for convenient pickup anytime."
+
+### WhatsApp Voice Note Dispatch Template
+- "Hello [Customer Name]! This is [Store Name] regarding your verified order of **${pTitle}**. We have your order packed and scheduled for courier dispatch today. Please reply with a quick 'CONFIRM' or your preferred delivery day so our driver can head your way. Thank you!"`;
+      } else if (isCreative) {
+        fallbackContent = `### ${effectiveSkillTitle}: ${pTitle}
+
+Direct-response viral creative blueprints and video hook scripts for **${pTitle}**, engineered for high CTR and low acquisition costs on Meta Advantage+ and TikTok feeds.
+
+### 4 High-Converting Viral Hooks
+1. **Hook 1: The Raw Egg Pattern Interrupt**
+   - **Visual Action**: Macro close-up placing a fragile raw egg on the cushion, followed by a 90kg adult sitting directly on it.
+   - **Voiceover**: "Can you sit directly on a raw egg without cracking it? Watch what happens when we test this honeycomb polymer!"
+2. **Hook 2: The Driver Sciatica Callout**
+   - **Visual Action**: POV driver groaning in tailbone pain after stepping out of a traffic jam, then placing the cushion on the car seat.
+   - **Voiceover**: "Stop scrolling if you drive more than 3 hours a day. This one simple fix eliminates lower back stiffness instantly."
+3. **Hook 3: COD Inspection Trust Hook**
+   - **Visual Action**: Happy customer at doorstep opening the courier parcel and flexing the durable silicone cushion before handing over cash.
+   - **Voiceover**: "Doorstep delivery across all 58 Wilayas — and you don't pay a single Dinar until you open and inspect it yourself!"
+4. **Hook 4: Desk Ergonomic Upgrade**
+   - **Visual Action**: Split-screen showing slouching on flat foam vs erect, effortless posture on the honeycomb cushion.
+   - **Voiceover**: "Transform rigid office chairs into all-day orthopedic comfort for just ${sPrice.toLocaleString()} DZD."
+
+### Full 30-Second Video Ad Script
+- **00:00 - 00:03 (Pattern Interrupt Hook)**:
+  - *Visual*: Rapid cut to the unbroken egg test demonstration with dramatic sound effect.
+  - *Voiceover*: "Zero pressure points. That's why the egg never breaks."
+- **00:04 - 00:10 (Pain Agitation)**:
+  - *Visual*: Anatomical graphic illustrating tailbone compression from standard seats.
+  - *Voiceover*: "Standard foam cushions trap heat and collapse, leaving your spine absorbing all the road vibration."
+- **00:11 - 00:20 (Demonstration & Proof)**:
+  - *Visual*: Flexing the resilient polymer matrix, highlighting the non-slip cover and breathable airflow vents.
+  - *Voiceover*: "The hyper-elastic gel distributes body weight evenly, keeping you cool and pain-free through 10-hour shifts."
+- **00:21 - 00:30 (Irresistible Offer & CTA)**:
+  - *Visual*: On-screen price tag: **${sPrice.toLocaleString()} DZD** (or 2 for ${(sPrice * 1.8).toFixed(0)} DZD) with 58 Wilaya COD badge.
+  - *Voiceover*: "Click below to claim yours today with doorstep delivery and inspect-before-you-pay guarantee!"`;
+      } else if (isAvatar) {
+        fallbackContent = `### ${effectiveSkillTitle}: ${pTitle}
+
+Target audience psychological profiling, daily pain points, and conversion triggers for **${pTitle}** in Algeria.
+
+### Primary Persona: The High-Commute Professional & Long-Shift Driver
+- **Demographic**: Male / Female, 28–58 years old, urban and suburban Algeria (Algiers, Oran, Constantine, Sétif, Blida).
+- **Occupation**: Taxi/VTC driver, long-distance hauler, public servant, IT/office desk professional.
+- **Daily Reality**: Spends 6 to 11 hours seated every day on unforgiving foam or rigid car seats.
+
+### Core Pain Points & Acute Daily Frustrations
+- Chronic lower back stiffness and severe coccyx / tailbone numbness at the end of each workday.
+- Excessive seat heat and perspiration during warm Algerian months, causing physical irritation.
+- Recurring expenses on painkiller medication and cheap foam cushions that sink and deform within 10 days.
+
+### Deep Emotional Desires & Status Motivators
+- **Immediate Physical Relief**: Ending the shift without groaning in pain when stepping out of the vehicle or chair.
+- **Productivity & Focus**: Working uninterrupted hours without fidgeting to find a comfortable sitting posture.
+- **Smart Investment Pride**: Owning an orthopedic tool that lasts years without breaking down.
+
+### Conversion Triggers & Messaging Angles
+- **The "Egg Test" Proof**: Pattern-interrupt demonstrating zero pressure point transfer onto fragile items.
+- **"Pay Only After Inspection" (المعاينة قبل الدفع)**: Completely eliminates COD skepticism and builds instant trust.
+- **Wilaya Delivery Assurance**: Clear promise of doorstep delivery to 58 Wilayas within 48 hours.`;
+      } else if (isProductDiscovery) {
+        fallbackContent = `### ${effectiveSkillTitle}: ${pTitle}
 
 ${pTitle} represents a high-velocity e-commerce opportunity with strong impulse-purchase triggers in the Algerian Cash on Delivery ecosystem. Priced at ${sPrice.toLocaleString()} DZD against a landed cost of ${pCost.toLocaleString()} DZD (+${pMargin}% gross margin), it provides healthy unit economics.
 
@@ -4806,139 +5015,127 @@ ${pTitle} represents a high-velocity e-commerce opportunity with strong impulse-
 ### Launch Verdict & Recommendations
 - **Verdict**: Scale immediately. Emphasize physical demonstration and Algerian Darja voiceover.
 - **Offer Structure**: Single unit at ${sPrice.toLocaleString()} DZD; Duo bundle at ${(sPrice * 1.8).toFixed(0)} DZD with free national delivery.`;
-      } else if (tLower.includes('deep dive') || tLower.includes('technical') || tLower.includes('spec') || tLower.includes('anatomy') || tLower.includes('quality')) {
-        fallbackContent = `### Product Technical & Practical Deep Dive: ${pTitle}
+      } else if (isCompetitor) {
+        fallbackContent = `### ${effectiveSkillTitle}: ${pTitle}
 
-An exhaustive ergonomic and material breakdown of ${pTitle}, analyzing physical build specifications, stress tolerances, and return-mitigation packaging protocols.
+Comprehensive competitive landscape, pricing benchmarks, and market differentiation strategy for **${pTitle}** in Algeria.
 
-\`\`\`
-USP → Value Prop → Positioning → Pricing
-   ├─ Breathable Honeycomb Gel Matrix
-   │   ├─ Dynamic Weight Redistribution & Pressure Relief
-   │   │   ├─ Desk & Office Professionals
-   │   │   │   ├─ ${sPrice.toLocaleString()} DZD
-   │   │   │   └─ Ergonomic Productivity & Posture
-   │   │   └─ Taxi, Truck & Commute Drivers
-   │   │       ├─ ${sPrice.toLocaleString()} DZD
-   │   │       └─ Road Shock Vibration Dampening
-   └─ Removable Non-Slip Washable Enclosure
-\`\`\`
+### Competitor Landscape & Benchmarks
 
-### Technical Specifications & Material Breakdown
+| Competitor / Store Archetype | Selling Price | Delivery Terms | Observed Weakness | Our Strategic Advantage |
+|------------------------------|---------------|----------------|-------------------|-------------------------|
+| Generic Drop-shipper Ads | 3,200 DZD | Paid Shipping (+600 DZD) | No inspection allowed, low-grade foam copy | Full open-box inspection guaranteed before payment |
+| Marketplace Stores (Ouedkniss) | 3,900 DZD | Stop-Desk Only | Slow dispatch (3-5 days), stockout delays | Stocked locally in Algiers & Blida; 24-48h delivery |
+| Medical Equipment Pharmacies | 5,500 DZD | In-store pickup only | High retail markup, zero doorstep delivery | Direct-to-consumer pricing at ${sPrice.toLocaleString()} DZD |
+| Our Brand Strategy | ${sPrice.toLocaleString()} DZD | Doorstep 58 Wilayas | None (Streamlined COD execution) | Egg-test video proof + 2-pack bundle at ${(sPrice * 1.8).toFixed(0)} DZD |
 
-| Component / Feature | Material & Engineering Spec | Quality Grade | Durability Impact |
-|---------------------|-----------------------------|---------------|-------------------|
-| Cushion Core | Hyper-elastic Medical Polymer Gel | Grade A+ Flex | Retains elastic memory; zero permanent sagging |
-| Matrix Architecture | Dual-layer Honeycomb Air Chambers | Pressure Dispersion | Promotes continuous air circulation; prevents sweat |
-| Protective Cover | Breathable Poly-Mesh Zippered Sleeve | Machine Washable | Protects polymer matrix from UV & particulate wear |
-| Base Traction | Micro-Silica Anti-Skid Friction Dots | High Grip | Prevents slippage on car leather & office chairs |
+### Market Gap & Dominance Strategy
+- **Demonstration Vacuum**: Competitors run static images or stolen low-res clips. Shooting authentic Algerian UGC with the egg test wins the feed immediately.
+- **Bundle Advantage**: Offering a 2-Pack Duo Cushion for ${(sPrice * 1.8).toFixed(0)} DZD captures multi-car and home+office buyers, increasing Average Order Value (AOV) by +35%.`;
+      } else if (isPricing) {
+        fallbackContent = `### ${effectiveSkillTitle}: ${pTitle}
 
-### Failure Points & COD Return Mitigation Table
+Financial modeling, landed cost breakdown, break-even thresholds, and wilaya revenue projections for **${pTitle}**.
 
-| Potential Failure Point | Failure Risk % | Root Cause | Packaging & Quality Prevention Fix |
-|-------------------------|----------------|------------|------------------------------------|
-| Customer perceives cushion too soft | 11% | Misunderstanding firmness vs pressure relief | Insert glossy user quick-start card inside box |
-| Transit compression creasing | 6% | Tight courier strapping | Ship uncompressed in flat reinforced polybags |
-| Zipper snagging during first wash | 3% | Low-gauge zipper pull | Inspect and verify reinforced nylon coil zippers |`;
-      } else if (tLower.includes('avatar') || tLower.includes('persona') || tLower.includes('strategy') || tLower.includes('positioning') || tLower.includes('buyer')) {
-        fallbackContent = `### Customer Persona & Market Strategy: ${pTitle}
+### Unit Economics Breakdown
 
-Target audience segmentation and psychological buying drivers for ${pTitle} in Algeria.
+| Cost Component | Value (DZD) | % of Price | Strategic Notes |
+|----------------|-------------|------------|-----------------|
+| Selling Price (Single Unit) | ${sPrice.toLocaleString()} DZD | 100.0% | Optimized impulse-purchase price point |
+| Wholesale COGS (Landed) | ${pCost.toLocaleString()} DZD | ${((pCost / sPrice) * 100).toFixed(1)}% | Landed cost from wholesale supplier |
+| Courier Delivery Fee (Average) | 450 DZD | 11.8% | Blended rate across 58 Wilayas |
+| Confirmation Call & SMS | 150 DZD | 3.9% | Rapid 10-minute call center & WhatsApp alert |
+| Packaging & Protective Wrap | 100 DZD | 2.6% | Reinforced polybag + user instruction insert |
+| RTO Loss Reserve (12% Return Buffer) | 185 DZD | 4.9% | Covers return freight on refused deliveries |
+| Target Ad Spend Allowance (CPA) | 600 DZD | 15.8% | Meta & TikTok Ads acquisition target |
+| **Net Profit per Delivered Order** | **${Math.max(pProfit - 1485, 950).toLocaleString()} DZD** | **${(Math.max(pProfit - 1485, 950) / sPrice * 100).toFixed(1)}%** | **Pure bottom-line net profit (+${pMargin}% Gross Margin)** |
 
-### Customer Avatar Matrix
+### Top Wilayas Projected Revenue Distribution
 
-| Avatar | Pain Points | Desires | Awareness Level | Objections |
-|----------------|-------------------|------------------|------------------|-------------------|
-| Professional Driver | Lower back stiffness, tailbone numbness on 6h+ shifts | Long-lasting relief, durable cushion that doesn't slip | Problem Aware | "Will it go flat after two weeks of heavy use?" |
-| Desk / Remote Worker | Poor desk posture, sciatic nerve pain, office fatigue | All-day comfort, higher focus, neat office look | Solution Aware | "Is the price justified compared to basic foam?" |
-| Post-Surgery / Elder | Tailbone soreness, inability to sit on hard dining chairs | Safe, soft orthopedic support recommended by family | Pain Aware | "Can I inspect the product before paying the courier?" |
+| Wilaya / Region | Projected Monthly Orders | Unit Price | Total Revenue (DZD) | % Share |
+|-----------------|--------------------------|------------|---------------------|---------|
+| Wilaya 16 - Alger | 140 Orders | ${sPrice} DZD | ${(sPrice * 140).toLocaleString()} DZD | 35% |
+| Wilaya 31 - Oran | 90 Orders | ${sPrice} DZD | ${(sPrice * 90).toLocaleString()} DZD | 22% |
+| Wilaya 19 - Sétif | 70 Orders | ${sPrice} DZD | ${(sPrice * 70).toLocaleString()} DZD | 17% |
+| Wilaya 25 - Constantine | 55 Orders | ${sPrice} DZD | ${(sPrice * 55).toLocaleString()} DZD | 14% |
+| Other 54 Wilayas | 45 Orders | ${sPrice} DZD | ${(sPrice * 45).toLocaleString()} DZD | 12% |
 
-### Pricing Strategy Evaluation
+### Break-Even ROAS Targets
+- **Minimum Break-Even ROAS**: **1.65x**
+- **Target Scaling ROAS**: **3.10x+**`;
+      } else if (isCampaign) {
+        fallbackContent = `### ${effectiveSkillTitle}: ${pTitle}
 
-| Pricing Strategy | Score | Demand Impact | Profit Potential |
-|------------------|-------|---------------|------------------|
-| Low Price Entry (${(sPrice * 0.8).toFixed(0)} DZD) | 6/10 | High Volume | Low margin buffer (${pMargin - 15}%) |
-| Recommended Sweetspot (${sPrice.toLocaleString()} DZD) | 9/10 | Balanced High Demand | Optimal Profit (+${pProfit.toLocaleString()} DZD / order) |
-| Premium 2x Duo Bundle (${(sPrice * 1.8).toFixed(0)} DZD) | 8.5/10 | +38% Increase in AOV | Maximum Net Profit & Free Wilaya Shipping |
-| **Overall Strategy** | **8.5/10** | **Balanced approach maximizing cash flow & conversion rate** |`;
-      } else if (tLower.includes('creative') || tLower.includes('hook') || tLower.includes('angle') || tLower.includes('copy') || tLower.includes('video') || tLower.includes('ugc') || tLower.includes('script')) {
-        fallbackContent = `### Creative Angles & Viral Hooks Engine: ${pTitle}
+Paid acquisition blueprint and budget distribution for scaling **${pTitle}** across Meta Ads and TikTok Ads in the Algerian market.
 
-Direct-response creative angles and viral scripts engineered for Meta & TikTok feeds.
+### Campaign & AdSet Budget Allocation
 
-### Creative Angle Matrix
+| Campaign / AdSet | Daily Budget (DZD) | % Share | Audience Targeting | Target CPA |
+|------------------|---------------------|---------|--------------------|------------|
+| CBO Broad Scaling (All 58 Wilayas) | 3,500 DZD | 50% | Men & Women 25-60, Broad Demographics | < 550 DZD |
+| High-Intent Interest Stack | 2,000 DZD | 29% | Drivers, Ergonomics, Office Chairs, Orthopedics | < 600 DZD |
+| Retargeting & Duo Bundle Campaign | 1,500 DZD | 21% | Video Viewers 75% & Cart Abandoners | < 450 DZD |
 
-| Angle Name | Hook Formula | Visual Concept | Emotion Targeted |
-|-------------------|---------------------------------|----------------|--------------------|
-| Comfort Revolution | "Discover the secret to pain-free daily sitting!" | Split-screen contrasting stiff posture vs instant comfort | Relief & Curiosity |
-| Driver's Daily Relief | "Say goodbye to back pain on every commute!" | In-car POV camera testing on uneven roads | Freedom & Relief |
-| The Unbreakable Egg Test | "Can you sit directly on an egg without breaking it?" | High-tension macro test sitting on a raw egg | Shock & Pattern Interrupt |
-| Workplace Upgrade | "Transform your stressful 8-hour workday into pure comfort!" | Clean office setup with energetic professional nod | Motivation & Status |
+### Funnel Performance Benchmarks
+- **Target Click-Through Rate (CTR)**: > 2.2% (driven by the egg-test hook).
+- **Target Cost per Click (CPC)**: < 25 DZD on Meta Feed / TikTok.
+- **Landing Page Conversion Rate (CVR)**: > 16% on streamlined 1-page COD form.
+- **Delivery Confirmation Rate**: > 84% post-phone call.`;
+      } else if (isLogistics) {
+        fallbackContent = `### ${effectiveSkillTitle}: ${pTitle}
 
-### Viral Hook Scripts with Predicted CTR %
+Operational fulfillment blueprint, courier delivery rates, and return-to-origin (RTO) suppression protocols for **${pTitle}** across 58 Algerian Wilayas.
 
-| Hook Script | Predicted CTR % | Format | Priority |
-|-------------------|-----------------|--------|----------|
-| "Stop scrolling if you drive or sit more than 4 hours a day — this changes everything!" | 12.8% | UGC Vertical 9:16 | P1 🔥 |
-| "We put a raw egg on this cushion and sat on it... watch what happened!" | 11.4% | Shock Pattern Interrupt | P1 🔥 |
-| "Doorstep delivery across all 58 Wilayas: open and verify the parcel before paying!" | 9.6% | COD Trust & Guarantee | P2 ⚡ |
-| "Why tolerate lower back pain when modern ergonomic polymer fixes it for ${sPrice} DZD?" | 8.4% | Problem-Agitation | P3 🎯 |
+### Courier Performance Matrix
 
-### Visual Storyboard Flow
-\`\`\`
-Step 1 (0-3s): Pattern Interrupt (Sudden close-up raw egg test demonstration).
-Step 2 (4-10s): Problem Agitation (Showing severe pressure on tailbone from rigid seats).
-Step 3 (11-20s): Product Utility (Showing breathable honeycomb flex & washable cover).
-Step 4 (21-30s): Irresistible Offer (Special price ${sPrice.toLocaleString()} DZD with 58 Wilaya COD).
-\`\`\``;
-      } else if (tLower.includes('delivery') || tLower.includes('courier') || tLower.includes('rto') || tLower.includes('return') || tLower.includes('confirmation') || tLower.includes('logistics') || tLower.includes('yalidine')) {
-        fallbackContent = `### Logistics, Courier Performance & RTO Suppression: ${pTitle}
+| Courier Partner | Delivery Rate % | Avg Transit Days | Stop-Desk Cost | Home Delivery | Strategic Role |
+|-----------------|-----------------|------------------|----------------|---------------|----------------|
+| Yalidine Express | 89.4% | 1.8 Days | 350 DZD | 550 DZD | 🟢 Primary National Partner |
+| ZR Express | 86.8% | 2.0 Days | 300 DZD | 500 DZD | 🟢 Urban Metro Specialist |
+| Nord & Sud Express | 81.2% | 3.5 Days | 450 DZD | 750 DZD | 🟡 South & Sahara Wilayas |
 
-Operational fulfillment and delivery rate optimization across 58 Algerian Wilayas.
+### Root Causes of Refused Deliveries & Actionable Fixes
+1. **Unreachable on Phone (39% of RTOs)**: Collect secondary mobile number on checkout form; dispatch WhatsApp voice reminder upon shipment.
+2. **Delivery Delay > 48 Hours (30% of RTOs)**: Hand parcels to courier sorting hubs before 16:00 daily to ensure next-day movement.
+3. **Customer Hesitation (19% of RTOs)**: Reiterate the inspect-before-paying guarantee in confirmation audio and SMS.
+4. **Refusal to Pay Delivery Fee (12% of RTOs)**: Always confirm the all-inclusive final price during the phone confirmation call.`;
+      } else if (isQuality) {
+        fallbackContent = `### ${effectiveSkillTitle}: ${pTitle}
 
-### Courier Delivery Performance
+Comprehensive quality control specifications, warehouse inspection checklist, and transit-safe packaging guidelines for **${pTitle}**.
 
-| Courier Partner | Delivery Rate % | Avg Transit Days | Cost (DZD) | Operational Status |
-|-----------------|-----------------|------------------|------------|-------------------|
-| Yalidine Express | 89.4% | 1.8 Days | 450 | 🟢 Primary National Partner |
-| ZR Express | 86.8% | 2.0 Days | 400 | 🟢 Urban Metro Specialist |
-| Nord & Sud Express | 81.2% | 3.5 Days | 650 | 🟡 South / Remote Wilayas |
+### Product Acceptance Specifications
+- **Polymer Elasticity**: Grade-A medical gel with instant rebound elasticity and zero permanent indentation.
+- **Honeycomb Cell Integrity**: Clean hexagonal cellular molding without tears, thinning, or residual manufacturing odor.
+- **Cover Durability**: Breathable poly-mesh zippered sleeve with reinforced double-stitching and anti-skid bottom friction studs.
 
-### RTO Failure Root Cause Analysis
-
-| Failure Reason | % of RTOs | Cumulative % | Priority | Actionable Fix |
-|----------------|-----------|--------------|----------|----------------|
-| Customer Unreachable on Phone | 39% | 39% | 1 | Collect 2 phone numbers on order form |
-| Delivery Delay (> 48h) | 30% | 69% | 2 | Dispatch parcels within 4 hours of phone confirmation |
-| Customer Impulsive Regret | 19% | 88% | 3 | Send WhatsApp voice confirmation reassuring guarantee |
-| Refusal to Pay Shipping | 12% | 100% | 4 | Explicitly confirm total price with shipping included |
-
-### Return Reduction Priority Matrix
-
-| Corrective Action | Impact (1-5) | Effort (1-5) | Priority |
-|-------------------|--------------|--------------|----------|
-| 10-Minute Instant WhatsApp Voice Note | 5 | 2 | 🟩 High |
-| Mandatory Backup Phone Number Input | 5 | 1 | 🟩 High |
-| SMS Tracking Link upon Pickup Dispatch | 4 | 2 | 🟩 High |
-| Wilaya-specific Stop-Desk Guidance | 4 | 3 | 🟨 Medium |`;
+### Warehouse Packaging & Inspection Checklist
+- [ ] Verify gel cushion core is completely free of surface punctures or oil exudation.
+- [ ] Inspect zipper slider functionality on cover across 3 complete open/close cycles.
+- [ ] Insert laminated "Quick-Start & Orthopedic Care Guide" inside the inner box.
+- [ ] Seal parcel inside waterproof, tear-resistant courier polybag.
+- [ ] Print and firmly affix barcoded shipping label with customer phone number 1 and backup phone number 2.
+- [ ] Scan parcel into courier pickup dispatch batch before 16:00 daily cutoff.`;
       } else {
-        fallbackContent = `### Strategic Intelligence: ${currentNode.title} for ${pTitle}
+        fallbackContent = `### ${effectiveSkillTitle}: ${pTitle}
 
-Executive strategic breakdown for **${pTitle}** in the ${effectiveProduct.niche || 'E-commerce'} category.
+Executive strategic breakdown and actionable implementation directives for **${pTitle}** in the ${effectiveProduct.niche || 'E-commerce'} category.
 
-### Opportunity & Performance Overview
+### Executive Overview & Strategic Assessment
+The commercial viability of **${pTitle}** in the Algerian e-commerce market is driven by high pain-point severity combined with immediate visual proof. Priced at **${sPrice.toLocaleString()} DZD** with a landed wholesale cost of **${pCost.toLocaleString()} DZD** (+${pMargin}% gross margin, +${pProfit.toLocaleString()} DZD gross profit), this product provides strong economic insulation against customer acquisition costs and logistics variances.
 
-| 🎯 Evaluation Metric | Value | Strategic Assessment |
-|----------------------|-------|----------------------|
-| Market Feasibility | 8.8/10 | High alignment with Algerian Cash on Delivery consumer demand |
-| Margin Viability | +${pMargin}% | Generous unit margin (+${pProfit.toLocaleString()} DZD) absorbs advertising costs |
-| Logistics Feasibility | 88% Delivery | Unbreakable polymer construction minimizes shipping damage |
-| Launch Readiness | Immediate | Standard SKU with established local supplier availability |
+### Core Strategic Directives
+- **Direct-Response Angle**: Lead with instant physical demonstration rather than abstract features.
+- **Pricing & Offer Architecture**: Anchor single unit at ${sPrice.toLocaleString()} DZD; aggressively cross-sell the 2-pack bundle at ${(sPrice * 1.8).toFixed(0)} DZD with free national delivery to maximize Average Order Value.
+- **Trust & Friction Removal**: Explicitly advertise "Inspect Parcel Before Paying" (المعاينة قبل الدفع) across creative captions and confirmation calls to slash customer hesitation.
+- **Logistics Tightening**: Enforce a 10-minute phone and WhatsApp confirmation window to ensure high courier acceptance rates across all 58 Wilayas.
 
-### Core Strategic Focus
-- **Target Pricing**: ${sPrice.toLocaleString()} DZD for single unit, ${(sPrice * 1.8).toFixed(0)} DZD for 2-pack bundle.
-- **Acquisition Angle**: Focus on demonstration of pressure relief and verified delivery across 58 Wilayas.
-- **Fulfillment Protocol**: 10-minute confirmation audio call to suppress return-to-origin rates under 12%.`;
+### Step-by-Step Implementation Roadmap
+1. **Supplier Lock-in**: Secure 100 units initial local wholesale stock with verified Grade-A elastic polymer quality.
+2. **Creative Production**: Film 4 direct-response hooks highlighting the contrast between rigid seats and instant honeycomb comfort.
+3. **Streamlined COD Funnel**: Deploy high-speed mobile landing page with 1-page Wilaya dropdown checkout.
+4. **Ad Launch Phase**: Allocate 3,500 DZD/day CBO campaign on Meta Advantage+ testing 3 video angles.
+5. **Confirmation & Dispatch**: Process all incoming orders within 10 minutes via standardized phone and WhatsApp audio protocols.`;
       }
 
       setNodes((prev) =>
@@ -8242,24 +8439,38 @@ Executive strategic breakdown for **${pTitle}** in the ${effectiveProduct.niche 
                           <ChevronDown className="w-3 h-3 text-slate-400" />
                         </button>
 
-                        {/* WORK PROMPT DEFAULT */}
-                        <button
-                          type="button"
-                          data-no-drag="true"
-                          onMouseDown={(e) => e.stopPropagation()}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSettingsModalNodeId(node.id);
-                            setSettingsActiveTab('prompt');
-                          }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-semibold shadow-2xs cursor-pointer"
-                          title="Edit AI Prompt Template"
-                        >
-                          <Sparkles className="w-3 h-3 text-purple-600" />
-                          <span>WORK PROMPT</span>
-                          <span className="text-[9px] uppercase px-1 py-0.2 bg-slate-100 rounded text-slate-500 font-mono">DEFAULT</span>
-                        </button>
+                        {/* WORK PROMPT PILL WITH ACTIVE PROMPT LABEL & COUNT */}
+                        {(() => {
+                          const { prompts, activeId } = getNodeSavedPrompts(node);
+                          const activePrompt = prompts.find((p) => p.id === activeId) || prompts[0];
+                          const activeLabel = activePrompt ? activePrompt.name : 'DEFAULT';
+                          return (
+                            <button
+                              type="button"
+                              data-no-drag="true"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onPointerDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSettingsModalNodeId(node.id);
+                                setSettingsActiveTab('prompt');
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-semibold shadow-2xs cursor-pointer group"
+                              title={`Current active prompt: "${activeLabel}". Click to view, add or switch prompts.`}
+                            >
+                              <Sparkles className="w-3 h-3 text-purple-600" />
+                              <span>WORK PROMPT</span>
+                              <span className="text-[9px] uppercase px-1.5 py-0.2 bg-purple-50 text-purple-700 border border-purple-200/70 rounded font-mono font-bold max-w-[100px] truncate">
+                                {activeLabel}
+                              </span>
+                              {prompts.length > 1 && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.2 bg-slate-100 text-slate-600 rounded-full">
+                                  {prompts.length}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })()}
 
                         {/* PREVIEW RESULTAT DEFAULT */}
                         <button
@@ -8402,9 +8613,14 @@ Executive strategic breakdown for **${pTitle}** in the ${effectiveProduct.niche 
                           onPointerDown={(e) => e.stopPropagation()}
                           onClick={(e) => {
                             e.stopPropagation();
-                            const prompt = node.config.customPrompt || getDefaultPromptForNode(node.title, node.subtitle);
+                            const { prompts, activeId } = getNodeSavedPrompts(node);
+                            const activePrompt = prompts.find((p) => p.id === activeId) || prompts[0];
+                            const prompt =
+                              activePrompt?.prompt ||
+                              node.config.customPrompt ||
+                              getDefaultPromptForNode(node.title, node.subtitle);
                             navigator.clipboard.writeText(prompt);
-                            showToast('AI Prompt copied to clipboard!');
+                            showToast(`AI Prompt "${activePrompt?.name || 'Default'}" copied to clipboard!`);
                           }}
                           className="px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
                         >
@@ -9003,6 +9219,15 @@ Executive strategic breakdown for **${pTitle}** in the ${effectiveProduct.niche 
                 >
                   <Sparkles className="w-3.5 h-3.5 text-purple-600" />
                   <span>AI Prompt Template</span>
+                  {(() => {
+                    if (!settingsModalNode) return null;
+                    const count = getNodeSavedPrompts(settingsModalNode).prompts.length;
+                    return count > 1 ? (
+                      <span className="ml-1 px-1.5 py-0.2 rounded-full text-[9.5px] font-bold bg-purple-100 text-purple-700">
+                        {count} prompts
+                      </span>
+                    ) : null;
+                  })()}
                 </button>
                 <button
                   onClick={() => setSettingsActiveTab('typography')}
@@ -9122,70 +9347,297 @@ Executive strategic breakdown for **${pTitle}** in the ${effectiveProduct.niche 
                     </div>
                   </div>
                 ) : settingsActiveTab === 'prompt' ? (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-slate-700">
-                        Custom AI Prompt Template
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const def = getDefaultPromptForNode(settingsModalNode.title, settingsModalNode.subtitle);
-                          updateNodeConfigById(settingsModalNode.id, { customPrompt: def });
-                        }}
-                        className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 cursor-pointer"
-                      >
-                        Reset to Default
-                      </button>
-                    </div>
+                  (() => {
+                    const { prompts, activeId } = getNodeSavedPrompts(settingsModalNode);
+                    const currentTabId =
+                      activePromptModalTabId && prompts.some((p) => p.id === activePromptModalTabId)
+                        ? activePromptModalTabId
+                        : activeId;
+                    const currentPromptItem =
+                      prompts.find((p) => p.id === currentTabId) || prompts[0];
+                    const isCurrentActive = currentPromptItem.id === activeId;
 
-                    <textarea
-                      rows={7}
-                      value={
-                        settingsModalNode.config.customPrompt !== undefined
-                          ? settingsModalNode.config.customPrompt
-                          : getDefaultPromptForNode(settingsModalNode.title, settingsModalNode.subtitle)
-                      }
-                      onChange={(e) =>
-                        updateNodeConfigById(settingsModalNode.id, { customPrompt: e.target.value })
-                      }
-                      className="w-full p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs font-mono text-slate-800 leading-relaxed focus:outline-none focus:border-blue-500 focus:bg-white"
-                    />
+                    return (
+                      <div className="space-y-4">
+                        {/* CSS selector 2: Custom AI Prompt Template header with background persistence indicator */}
+                        <div className="flex items-center justify-between pb-2 border-b border-slate-100 flex-wrap gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                              <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                              Custom AI Prompt Template
+                            </span>
+                            <span
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200"
+                              title="Any changes are automatically saved directly in the background and restored when you reopen the app"
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                              Auto-saved in background
+                            </span>
+                          </div>
 
-                    <div>
-                      <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1.5">
-                        Click variable to insert:
-                      </span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {[
-                          '{product_title}',
-                          '{niche}',
-                          '{selling_price}',
-                          '{product_cost}',
-                          '{profit_margin}',
-                          '{selling_points}',
-                          '{language}',
-                        ].map((variableTag) => (
-                          <button
-                            key={variableTag}
-                            type="button"
-                            onClick={() => {
-                              const current =
-                                settingsModalNode.config.customPrompt !== undefined
-                                  ? settingsModalNode.config.customPrompt
-                                  : getDefaultPromptForNode(settingsModalNode.title, settingsModalNode.subtitle);
-                              updateNodeConfigById(settingsModalNode.id, {
-                                customPrompt: current + ' ' + variableTag,
-                              });
-                            }}
-                            className="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300 border border-slate-200 text-[10.5px] font-mono text-slate-600 transition-colors cursor-pointer"
-                          >
-                            +{variableTag}
-                          </button>
-                        ))}
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newId = `prompt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+                                const newPromptObj: SavedPromptItem = {
+                                  id: newId,
+                                  name: `Prompt #${prompts.length + 1}`,
+                                  prompt: getDefaultPromptForNode(settingsModalNode.title, settingsModalNode.subtitle),
+                                  createdAt: new Date().toISOString(),
+                                  isDefault: false,
+                                };
+                                const nextList = [...prompts, newPromptObj];
+                                setActivePromptModalTabId(newId);
+                                handleUpdatePromptsForNode(settingsModalNode.id, nextList, activeId);
+                                showToast(`✓ Added new prompt "${newPromptObj.name}"! Saved in background.`);
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                              title="Add another prompt for this skill"
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>Add Prompt</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const copyId = `prompt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+                                const duplicateObj: SavedPromptItem = {
+                                  id: copyId,
+                                  name: `Copy of ${currentPromptItem.name}`,
+                                  prompt: currentPromptItem.prompt,
+                                  createdAt: new Date().toISOString(),
+                                  isDefault: false,
+                                };
+                                const nextList = [...prompts, duplicateObj];
+                                setActivePromptModalTabId(copyId);
+                                handleUpdatePromptsForNode(settingsModalNode.id, nextList, activeId);
+                                showToast(`✓ Duplicated to "${duplicateObj.name}"! Saved in background.`);
+                              }}
+                              className="px-2 py-1 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                              title="Duplicate current prompt"
+                            >
+                              <Copy className="w-3 h-3 text-slate-500" />
+                              <span>Duplicate</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const def = getDefaultPromptForNode(settingsModalNode.title, settingsModalNode.subtitle);
+                                const updated = prompts.map((p) =>
+                                  p.id === currentPromptItem.id ? { ...p, prompt: def } : p
+                                );
+                                handleUpdatePromptsForNode(settingsModalNode.id, updated, activeId);
+                                showToast('Reset current prompt to default template');
+                              }}
+                              className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 cursor-pointer px-1.5 py-1"
+                            >
+                              Reset to Default
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Multi-Prompt Switcher Tabs / Pills */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-bold text-slate-600 uppercase tracking-wider text-[10px]">
+                              Saved Prompts ({prompts.length}) — Click to view or choose active:
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+                            {prompts.map((pItem, idx) => {
+                              const isSelectedTab = pItem.id === currentPromptItem.id;
+                              const isThisActive = pItem.id === activeId;
+                              return (
+                                <div
+                                  key={pItem.id}
+                                  onClick={() => setActivePromptModalTabId(pItem.id)}
+                                  className={`group px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-2 cursor-pointer transition-all select-none whitespace-nowrap shrink-0 ${
+                                    isSelectedTab
+                                      ? 'bg-purple-50/90 border-purple-300 text-purple-900 shadow-xs ring-1 ring-purple-200'
+                                      : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-600'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-1.5">
+                                    {isThisActive ? (
+                                      <span
+                                        className="w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-emerald-200"
+                                        title="Active prompt chosen for AI execution"
+                                      />
+                                    ) : (
+                                      <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                                    )}
+                                    <span>{pItem.name || `Prompt ${idx + 1}`}</span>
+                                  </div>
+
+                                  {isThisActive && (
+                                    <span className="px-1.5 py-0.2 rounded-md bg-emerald-100 text-emerald-800 text-[9.5px] font-bold tracking-tight">
+                                      ACTIVE
+                                    </span>
+                                  )}
+
+                                  {prompts.length > 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const nextList = prompts.filter((p) => p.id !== pItem.id);
+                                        const nextActive = isThisActive ? nextList[0].id : activeId;
+                                        const nextTab = isSelectedTab ? nextList[0].id : currentPromptItem.id;
+                                        setActivePromptModalTabId(nextTab);
+                                        handleUpdatePromptsForNode(settingsModalNode.id, nextList, nextActive);
+                                        showToast(`Removed prompt "${pItem.name}"`);
+                                      }}
+                                      className="p-0.5 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                                      title="Delete this prompt"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newId = `prompt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+                                const newPromptObj: SavedPromptItem = {
+                                  id: newId,
+                                  name: `Prompt #${prompts.length + 1}`,
+                                  prompt: getDefaultPromptForNode(settingsModalNode.title, settingsModalNode.subtitle),
+                                  createdAt: new Date().toISOString(),
+                                  isDefault: false,
+                                };
+                                const nextList = [...prompts, newPromptObj];
+                                setActivePromptModalTabId(newId);
+                                handleUpdatePromptsForNode(settingsModalNode.id, nextList, activeId);
+                                showToast(`✓ Added "${newPromptObj.name}"! Saved in background.`);
+                              }}
+                              className="px-2.5 py-1.5 rounded-xl border border-dashed border-slate-300 hover:border-blue-400 hover:bg-blue-50/50 text-slate-500 hover:text-blue-600 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>Add</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Active Selection Banner & Prompt Name Config */}
+                        <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                          <div className="flex-1 min-w-0">
+                            <label className="text-[10px] font-bold uppercase text-slate-500 block mb-1">
+                              Prompt Name / Label:
+                            </label>
+                            <input
+                              type="text"
+                              value={currentPromptItem.name}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                const updated = prompts.map((p) =>
+                                  p.id === currentPromptItem.id ? { ...p, name: val } : p
+                                );
+                                handleUpdatePromptsForNode(settingsModalNode.id, updated, activeId);
+                              }}
+                              placeholder="e.g. Angle 1 - Direct Response, Darja Pitch, French Formal..."
+                              className="w-full px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:border-blue-500"
+                            />
+                          </div>
+
+                          <div className="flex items-center gap-2 self-end sm:self-auto shrink-0 pt-2 sm:pt-0">
+                            {isCurrentActive ? (
+                              <div className="px-3 py-1.5 rounded-xl bg-emerald-100/90 border border-emerald-300 text-emerald-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs">
+                                <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[3]" />
+                                <span>CHOSEN FOR AI RUN</span>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleUpdatePromptsForNode(settingsModalNode.id, prompts, currentPromptItem.id);
+                                  showToast(`✓ Set "${currentPromptItem.name}" as active prompt! Saved directly in background.`);
+                                }}
+                                className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95"
+                                title="Click to use this prompt when running AI analysis"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Choose This Prompt</span>
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleUpdatePromptsForNode(settingsModalNode.id, prompts, activeId);
+                                showToast(`✓ Prompt "${currentPromptItem.name}" saved directly in background!`);
+                              }}
+                              className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                              title="Save directly in background (persists on restart)"
+                            >
+                              <Save className="w-3.5 h-3.5 text-slate-500" />
+                              <span>Save</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* CSS selector 1: The prompt textarea */}
+                        <textarea
+                          rows={7}
+                          value={currentPromptItem.prompt}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const updated = prompts.map((p) =>
+                              p.id === currentPromptItem.id ? { ...p, prompt: val } : p
+                            );
+                            handleUpdatePromptsForNode(settingsModalNode.id, updated, activeId);
+                          }}
+                          placeholder="Write your custom prompt template here..."
+                          className="w-full p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs font-mono text-slate-800 leading-relaxed focus:outline-none focus:border-blue-500 focus:bg-white resize-y"
+                        />
+
+                        {/* Variables insert & word count */}
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] uppercase font-bold text-slate-400">
+                              Click variable to insert:
+                            </span>
+                            <span className="text-[10.5px] font-mono text-slate-500">
+                              {currentPromptItem.prompt.length} chars • {currentPromptItem.prompt.trim().split(/\s+/).filter(Boolean).length} words
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap gap-1.5">
+                            {[
+                              '{product_title}',
+                              '{niche}',
+                              '{selling_price}',
+                              '{product_cost}',
+                              '{profit_margin}',
+                              '{selling_points}',
+                              '{language}',
+                            ].map((variableTag) => (
+                              <button
+                                key={variableTag}
+                                type="button"
+                                onClick={() => {
+                                  const val = currentPromptItem.prompt + ' ' + variableTag;
+                                  const updated = prompts.map((p) =>
+                                    p.id === currentPromptItem.id ? { ...p, prompt: val } : p
+                                  );
+                                  handleUpdatePromptsForNode(settingsModalNode.id, updated, activeId);
+                                }}
+                                className="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300 border border-slate-200 text-[10.5px] font-mono text-slate-600 transition-colors cursor-pointer"
+                              >
+                                +{variableTag}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
+                    );
+                  })()
                 ) : (
                   /* TYPOGRAPHY & TEXT STYLING TAB (Taille & Style du texte) */
                   <div className="space-y-5">
